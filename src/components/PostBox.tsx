@@ -138,6 +138,7 @@ export default function PostBox() {
   const handleGifSelect = (gifUrl: string) => { setGifs(prev => [...prev, gifUrl]); setShowGifPicker(false); };
   const removeMedia = (idx: number) => { const localFilesCount = previews.length; if (idx < localFilesCount) { setImages(prev => prev.filter((_, i) => i !== idx)); setPreviews(prev => prev.filter((_, i) => i !== idx)); } else { const gifIdx = idx - localFilesCount; setGifs(prev => prev.filter((_, i) => i !== gifIdx)); } };
 
+  // 🔥 带路由分发与真实 author_id 写入的发布逻辑
   const handlePost = async () => {
     setLoading(true);
     try {
@@ -159,23 +160,40 @@ export default function PostBox() {
         }
       }
       
+      // 🌟 智能路由分发 & 漏洞修补
       if (selectedTag === '#城市搭子') {
         const { error: postError } = await supabase.from('companion_rooms').insert({ 
-          city_name: city, title: title, description: content.trim(), author_name: authorName, author_avatar: authorAvatar, reply_count: 0 
+          author_id: user.id, // 🌟 核心修复：强制绑定房东 ID
+          city_name: city, 
+          title: title, 
+          description: content.trim(), 
+          author_name: authorName, 
+          author_avatar: authorAvatar,
+          reply_count: 0 
         });
         if (postError) throw postError;
         alert('搭子招募发布成功！请前往左侧【城市搭子】板块查看。');
 
       } else if (selectedTag === '#章鱼房间') {
         const { error: postError } = await supabase.from('octo_rooms').insert({ 
-          city_name: city, title: title, description: content.trim(), author_name: authorName, author_avatar: authorAvatar, reply_count: 0 
+          author_id: user.id, // 🌟 核心修复：强制绑定房东 ID
+          city_name: city, 
+          title: title, 
+          description: content.trim(), 
+          author_name: authorName, 
+          author_avatar: authorAvatar,
+          reply_count: 0 
         });
         if (postError) throw postError;
         alert('章鱼房间发布成功！请前往左侧【章鱼房间】板块查看。');
 
       } else {
         const { error: postError } = await supabase.from('posts').insert({ 
-          content: content.trim(), author_id: user.id, username: authorName, image_urls: uploadedUrls, quote_post_id: quotePost ? quotePost.id : null 
+          content: content.trim(), 
+          author_id: user.id, 
+          username: authorName, 
+          image_urls: uploadedUrls,
+          quote_post_id: quotePost ? quotePost.id : null 
         });
         if (postError) throw postError;
       }
