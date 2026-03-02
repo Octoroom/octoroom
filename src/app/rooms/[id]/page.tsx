@@ -446,7 +446,7 @@ export default function RoomDetailPage() {
     ? room.cover_image.split(',').map((s:string) => s.trim()).filter(Boolean)
     : [roomId ? `https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800&q=80&random=${roomId}` : ''];
 
-  const isHost = currentUser?.id === room.author_id;
+  const isHost = false; // currentUser?.id === room.author_id;
   const canApply = !myBooking || ['cancelled', 'rejected', 'paid'].includes(myBooking.status);
   const validAmenities = room.amenities ? room.amenities.split(',').map((s:string) => s.trim()).filter(Boolean) : [];
   const osmBbox = room.latitude && room.longitude ? `${room.longitude - 0.008},${room.latitude - 0.008},${room.longitude + 0.008},${room.latitude + 0.008}` : '';
