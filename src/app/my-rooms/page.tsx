@@ -5,18 +5,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 
-// 🌟 引入 Leaflet 地图核心库与样式
+// 🌟 FIX 1: Import CSS statically (Next.js handles this safely)
 import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
 
-if (typeof window !== 'undefined') {
-  delete (L.Icon.Default.prototype as any)._getIconUrl;
-  L.Icon.Default.mergeOptions({
-    iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-  });
-}
+// 🌟 FIX 2: Import ONLY the types for TypeScript, avoiding the actual JS payload on the server
+import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet';
 
 function formatDate(date: Date) {
   const y = date.getFullYear(); const m = String(date.getMonth() + 1).padStart(2, '0'); const d = String(date.getDate()).padStart(2, '0');
@@ -148,9 +141,11 @@ export default function MyRoomsPage() {
   const [isPublishing, setIsPublishing] = useState(false);
   
   const [isGeocoding, setIsGeocoding] = useState(false);
+  
+  // 🌟 FIX 3: Use the imported types here
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<L.Map | null>(null);
-  const markerRef = useRef<L.Marker | null>(null);
+  const mapInstanceRef = useRef<LeafletMap | null>(null);
+  const markerRef = useRef<LeafletMarker | null>(null);
 
   const [replyTexts, setReplyTexts] = useState<Record<string, string>>({});
 
@@ -192,33 +187,46 @@ export default function MyRoomsPage() {
 
   useEffect(() => { fetchData(); }, []);
 
+  // 🌟 FIX 4: Dynamically import Leaflet inside useEffect
   useEffect(() => {
     if (isPublishModalOpen && mapContainerRef.current && !mapInstanceRef.current) {
-      const initialLat = formData.lat || -36.8485;
-      const initialLng = formData.lng || 174.7633;
-      
-      const map = L.map(mapContainerRef.current).setView([initialLat, initialLng], formData.lat ? 15 : 12);
-      
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors'
-      }).addTo(map);
+      (async () => {
+        const L = (await import('leaflet')).default;
 
-      if (formData.lat && formData.lng) {
-        markerRef.current = L.marker([formData.lat, formData.lng]).addTo(map);
-      }
+        // Fix the icons
+        delete (L.Icon.Default.prototype as any)._getIconUrl;
+        L.Icon.Default.mergeOptions({
+          iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+          iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+          shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+        });
 
-      map.on('click', (e) => {
-        const { lat, lng } = e.latlng;
-        setFormData(prev => ({ ...prev, lat, lng }));
+        const initialLat = formData.lat || -36.8485;
+        const initialLng = formData.lng || 174.7633;
         
-        if (!markerRef.current) {
-          markerRef.current = L.marker([lat, lng]).addTo(map);
-        } else {
-          markerRef.current.setLatLng([lat, lng]);
-        }
-      });
+        const map = L.map(mapContainerRef.current!).setView([initialLat, initialLng], formData.lat ? 15 : 12);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
 
-      mapInstanceRef.current = map;
+        if (formData.lat && formData.lng) {
+          markerRef.current = L.marker([formData.lat, formData.lng]).addTo(map);
+        }
+
+        map.on('click', (e: any) => {
+          const { lat, lng } = e.latlng;
+          setFormData(prev => ({ ...prev, lat, lng }));
+          
+          if (!markerRef.current) {
+            markerRef.current = L.marker([lat, lng]).addTo(map);
+          } else {
+            markerRef.current.setLatLng([lat, lng]);
+          }
+        });
+
+        mapInstanceRef.current = map;
+      })();
     }
 
     return () => {
@@ -230,6 +238,7 @@ export default function MyRoomsPage() {
     };
   }, [isPublishModalOpen]);
 
+  // 🌟 FIX 5: Dynamically import Leaflet inside handleGeocode
   const handleGeocode = async (e: React.MouseEvent) => {
     e.preventDefault(); 
     if (!formData.addressName.trim()) { alert("请先输入具体地址哦！"); return; }
@@ -245,6 +254,7 @@ export default function MyRoomsPage() {
         if (mapInstanceRef.current) {
           mapInstanceRef.current.flyTo([lat, lng], 16, { duration: 1.5 });
           if (!markerRef.current) {
+            const L = (await import('leaflet')).default;
             markerRef.current = L.marker([lat, lng]).addTo(mapInstanceRef.current);
           } else {
             markerRef.current.setLatLng([lat, lng]);
