@@ -5,8 +5,10 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { v4 as uuidv4 } from 'uuid';
 
-// 🌟 核心修复 1：只静态引入类型，避免在服务端加载真实的 Leaflet 代码
+// 🌟 修复 1：只静态引入类型，避免在服务端加载真实的 Leaflet JS 代码
 import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet';
+// 🌟 修复 2：将 CSS 放回顶部静态引入，Next.js 原生支持服务端加载 CSS，且不会触发 TS 报错
+import 'leaflet/dist/leaflet.css';
 
 interface CompanionRoom {
   id: string;
@@ -85,7 +87,7 @@ export default function CompanionsPage() {
   const [isPublishing, setIsPublishing] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
 
-  // 🌟 核心修复 2：使用引入的 Leaflet 类型替代 any
+  // 使用引入的 Leaflet 类型替代 any
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<LeafletMap | null>(null);
   const markerRef = useRef<LeafletMarker | null>(null);
@@ -186,13 +188,12 @@ export default function CompanionsPage() {
     }
   };
 
-  // 🌟 核心修复 3：在客户端 useEffect 中异步动态加载 Leaflet
+  // 🌟 修复 3：在客户端 useEffect 中异步动态加载 Leaflet JS 核心
   useEffect(() => {
     if (isPublishModalOpen && mapContainerRef.current && !mapInstanceRef.current) {
       (async () => {
-        // 动态导入 leaflet 及其样式
+        // 仅动态导入 leaflet 的 JS
         const L = (await import('leaflet')).default;
-        await import('leaflet/dist/leaflet.css');
 
         // 在客户端环境下安全修复图标
         delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -273,7 +274,7 @@ export default function CompanionsPage() {
         if (mapInstanceRef.current) {
           mapInstanceRef.current.flyTo([lat, lng], 16, { duration: 1.5 });
           if (!markerRef.current) {
-            // 🌟 核心修复 4：如果 marker 为空，在这里也要动态获取一次 L
+            // 🌟 修复 4：如果 marker 为空，在这里也要动态获取一次 L
             const L = (await import('leaflet')).default;
             markerRef.current = L.marker([lat, lng]).addTo(mapInstanceRef.current);
           } else {
