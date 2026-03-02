@@ -264,7 +264,7 @@ export default function UserProfilePage() {
         </button>
         <div>
           <h1 className="text-[17px] font-black text-gray-900 leading-tight">{displayName}</h1>
-          <p className="text-[12px] text-gray-500 font-medium">{stats.postsCount} posts</p>
+          <p className="text-[12px] text-gray-500 font-medium">{(stats as any).postsCount} posts</p>
         </div>
       </div>
 
