@@ -21,6 +21,7 @@ interface Message {
   sender_id: string;
   content: string;
   created_at: string;
+  conversation_id: string;
   is_read?: boolean;
 }
 
