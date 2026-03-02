@@ -5,19 +5,8 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { v4 as uuidv4 } from 'uuid';
 
-// 引入 Leaflet 地图核心库与样式
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
-
-// 修复 Next.js 中 Leaflet 默认标记图标丢失的问题
-if (typeof window !== 'undefined') {
-  delete (L.Icon.Default.prototype as any)._getIconUrl;
-  L.Icon.Default.mergeOptions({
-    iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-  });
-}
+// 🌟 核心修复 1：只静态引入类型，避免在服务端加载真实的 Leaflet 代码
+import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet';
 
 interface CompanionRoom {
   id: string;
@@ -96,17 +85,17 @@ export default function CompanionsPage() {
   const [isPublishing, setIsPublishing] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
 
+  // 🌟 核心修复 2：使用引入的 Leaflet 类型替代 any
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<L.Map | null>(null);
-  const markerRef = useRef<L.Marker | null>(null);
+  const mapInstanceRef = useRef<LeafletMap | null>(null);
+  const markerRef = useRef<LeafletMarker | null>(null);
 
-  // 🌟 新增：页面加载时，拉取当前用户所有点赞和收藏的房间 ID
+  // 页面加载时，拉取当前用户所有点赞和收藏的房间 ID
   const fetchUserInteractions = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     try {
-      // 并发请求点赞和收藏数据，提升加载速度
       const [likesRes, marksRes] = await Promise.all([
         supabase.from('companion_likes').select('room_id').eq('user_id', user.id),
         supabase.from('companion_marks').select('room_id').eq('user_id', user.id)
@@ -123,14 +112,12 @@ export default function CompanionsPage() {
     }
   };
 
-  // 页面初始化时触发数据拉取
   useEffect(() => {
     fetchUserInteractions();
   }, []);
 
-  // 🌟 升级：带防冒泡与真实写库的点赞处理函数
   const handleToggleLike = async (e: React.MouseEvent, roomId: string) => {
-    e.stopPropagation(); // 阻止卡片跳转
+    e.stopPropagation(); 
     
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -140,7 +127,6 @@ export default function CompanionsPage() {
 
     const isAlreadyLiked = userLikes.has(roomId);
 
-    // 1. 乐观 UI 更新：先让心心变红/变灰，提供瞬间的反馈
     setUserLikes(prev => {
       const next = new Set(prev);
       if (isAlreadyLiked) next.delete(roomId);
@@ -148,7 +134,6 @@ export default function CompanionsPage() {
       return next;
     });
 
-    // 2. 真实写库操作
     try {
       if (isAlreadyLiked) {
         await supabase.from('companion_likes').delete().eq('room_id', roomId).eq('user_id', user.id);
@@ -157,7 +142,6 @@ export default function CompanionsPage() {
       }
     } catch (error) {
       console.error("点赞同步失败", error);
-      // 如果写库失败，回退 UI 状态
       setUserLikes(prev => {
         const next = new Set(prev);
         if (isAlreadyLiked) next.add(roomId);
@@ -167,9 +151,8 @@ export default function CompanionsPage() {
     }
   };
 
-  // 🌟 升级：带防冒泡与真实写库的收藏处理函数
   const handleToggleMark = async (e: React.MouseEvent, roomId: string) => {
-    e.stopPropagation(); // 阻止卡片跳转
+    e.stopPropagation(); 
     
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -179,7 +162,6 @@ export default function CompanionsPage() {
 
     const isAlreadyMarked = userMarks.has(roomId);
 
-    // 1. 乐观 UI 更新
     setUserMarks(prev => {
       const next = new Set(prev);
       if (isAlreadyMarked) next.delete(roomId);
@@ -187,7 +169,6 @@ export default function CompanionsPage() {
       return next;
     });
 
-    // 2. 真实写库操作
     try {
       if (isAlreadyMarked) {
         await supabase.from('companion_marks').delete().eq('room_id', roomId).eq('user_id', user.id);
@@ -196,7 +177,6 @@ export default function CompanionsPage() {
       }
     } catch (error) {
       console.error("收藏同步失败", error);
-      // 回退 UI 状态
       setUserMarks(prev => {
         const next = new Set(prev);
         if (isAlreadyMarked) next.add(roomId);
@@ -206,34 +186,49 @@ export default function CompanionsPage() {
     }
   };
 
-  // 初始化地图
+  // 🌟 核心修复 3：在客户端 useEffect 中异步动态加载 Leaflet
   useEffect(() => {
     if (isPublishModalOpen && mapContainerRef.current && !mapInstanceRef.current) {
-      const initialLat = formData.lat || -36.8485;
-      const initialLng = formData.lng || 174.7633;
-      
-      const map = L.map(mapContainerRef.current).setView([initialLat, initialLng], formData.lat ? 15 : 12);
-      
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors'
-      }).addTo(map);
+      (async () => {
+        // 动态导入 leaflet 及其样式
+        const L = (await import('leaflet')).default;
+        await import('leaflet/dist/leaflet.css');
 
-      if (formData.lat && formData.lng) {
-        markerRef.current = L.marker([formData.lat, formData.lng]).addTo(map);
-      }
+        // 在客户端环境下安全修复图标
+        delete (L.Icon.Default.prototype as any)._getIconUrl;
+        L.Icon.Default.mergeOptions({
+          iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+          iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+          shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+        });
 
-      map.on('click', (e) => {
-        const { lat, lng } = e.latlng;
-        setFormData(prev => ({ ...prev, lat, lng }));
+        const initialLat = formData.lat || -36.8485;
+        const initialLng = formData.lng || 174.7633;
         
-        if (!markerRef.current) {
-          markerRef.current = L.marker([lat, lng]).addTo(map);
-        } else {
-          markerRef.current.setLatLng([lat, lng]);
-        }
-      });
+        // 注意加上 `!` 断言 mapContainerRef.current 不为空
+        const map = L.map(mapContainerRef.current!).setView([initialLat, initialLng], formData.lat ? 15 : 12);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
 
-      mapInstanceRef.current = map;
+        if (formData.lat && formData.lng) {
+          markerRef.current = L.marker([formData.lat, formData.lng]).addTo(map);
+        }
+
+        map.on('click', (e: any) => {
+          const { lat, lng } = e.latlng;
+          setFormData(prev => ({ ...prev, lat, lng }));
+          
+          if (!markerRef.current) {
+            markerRef.current = L.marker([lat, lng]).addTo(map);
+          } else {
+            markerRef.current.setLatLng([lat, lng]);
+          }
+        });
+
+        mapInstanceRef.current = map;
+      })();
     }
 
     return () => {
@@ -278,6 +273,8 @@ export default function CompanionsPage() {
         if (mapInstanceRef.current) {
           mapInstanceRef.current.flyTo([lat, lng], 16, { duration: 1.5 });
           if (!markerRef.current) {
+            // 🌟 核心修复 4：如果 marker 为空，在这里也要动态获取一次 L
+            const L = (await import('leaflet')).default;
             markerRef.current = L.marker([lat, lng]).addTo(mapInstanceRef.current);
           } else {
             markerRef.current.setLatLng([lat, lng]);
@@ -379,7 +376,6 @@ export default function CompanionsPage() {
       if (cityQuery) query = query.ilike('city_name', `%${cityQuery}%`);
       if (filterCategory !== 'all') query = query.eq('category', filterCategory);
       
-      // 应用高级筛选
       if (advancedFilters.budget !== 'all') query = query.eq('budget', advancedFilters.budget);
       if (advancedFilters.gender !== 'all') query = query.eq('gender', advancedFilters.gender);
       if (advancedFilters.transport !== 'all') query = query.eq('transport', advancedFilters.transport);
@@ -514,7 +510,6 @@ export default function CompanionsPage() {
                       <span className="text-[11px] text-gray-500 truncate">{room.author_name}</span>
                     </div>
                     
-                    {/* 🌟 核心修复：真实写库的点赞与收藏卡片区 */}
                     <div className="flex items-center gap-2.5 flex-shrink-0 pl-2">
                       <div 
                         className={`flex items-center gap-1 cursor-pointer group transition-colors ${userLikes.has(room.id) ? 'text-red-500' : 'text-gray-400 hover:text-red-500'}`}
@@ -524,7 +519,6 @@ export default function CompanionsPage() {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
                         </svg>
                         <span className="text-[11px] font-medium">
-                          {/* 如果未点赞显示随机数，点赞后视觉+1 */}
                           {Math.floor(Math.random() * 50) + 1 + (userLikes.has(room.id) ? 1 : 0)}
                         </span>
                       </div>
@@ -702,7 +696,6 @@ export default function CompanionsPage() {
         </div>
       )}
 
-      {/* 🌟 真实运作的高级筛选底层抽屉 Modal */}
       {isFilterModalOpen && (
         <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
           <div className="bg-white rounded-t-[24px] sm:rounded-[24px] w-full max-w-md flex flex-col shadow-2xl animate-in slide-in-from-bottom duration-300">
