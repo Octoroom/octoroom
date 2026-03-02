@@ -250,7 +250,7 @@ export default function MessagesPage() {
         setConversations(prev => prev.map(c => c.partner_id === activeConvo.partner_id ? { ...c, id: finalConvoId, all_convo_ids: [...c.all_convo_ids, finalConvoId] } : c));
       }
 
-      const tempMessage: Message = { id: uuidv4(), sender_id: currentUserId, content: contentToSend, created_at: new Date().toISOString() };
+      const tempMessage: Message = { id: uuidv4(), sender_id: currentUserId, content: contentToSend, created_at: new Date().toISOString(), conversation_id: activeConvoId};
       setMessages(prev => [...prev, tempMessage]);
 
       setConversations(prev => prev.map(c => 
