@@ -1,3 +1,4 @@
+// src/components/AuthModal.tsx
 'use client';
 
 import { useState } from 'react';
@@ -16,7 +17,7 @@ export default function AuthModal() {
 
     try {
       if (isSignUp) {
-        // 注册时，将 username 作为元数据传入，触发器会自动将其写入 profiles 表
+        // 1. 注册时，将 username 作为元数据传入
         const { data, error } = await supabase.auth.signUp({ 
           email, 
           password,
@@ -26,13 +27,26 @@ export default function AuthModal() {
         });
         if (error) throw error;
         
-        // 检查是否需要邮箱验证 (如果开启了 Confirm Email，此时 session 为 null)
+        // 🌟 核心修复：前端手动同步数据到 profiles 表（双重保险）
+        if (data?.user) {
+          const { error: profileError } = await supabase.from('profiles').upsert({
+            id: data.user.id,
+            username: username,
+            avatar_url: `https://api.dicebear.com/7.x/adventurer/svg?seed=${data.user.id}`
+          });
+          if (profileError) {
+            console.error('创建 Profile 失败:', profileError.message);
+          }
+        }
+
+        // 2. 检查是否需要邮箱验证
         if (data?.user && !data.session) {
           alert('注册成功！\n\n请前往邮箱点击验证链接激活账号，然后在此登录。');
           setIsSignUp(false); // 切换回登录模式
           return;
         }
 
+        // 3. 注册并自动登录成功
         const userId = data?.user?.id || data?.session?.user?.id;
         if (userId) {
           localStorage.setItem('octo_room_user_id', userId);
@@ -43,6 +57,7 @@ export default function AuthModal() {
         window.location.reload(); 
         
       } else {
+        // 🌟 登录逻辑
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
           if (error.message.includes('Email not confirmed')) {
