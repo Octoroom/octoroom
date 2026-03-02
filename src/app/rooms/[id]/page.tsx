@@ -233,6 +233,7 @@ export default function RoomDetailPage() {
     } catch (err) { console.error('收藏操作失败'); }
   };
 
+  // 🌟 核心跳转：触发私聊
   const handleChatWith = (targetUserId: string) => {
     if (!currentUser) {
       alert("请先登录后再发起私聊哦！");
@@ -515,8 +516,8 @@ export default function RoomDetailPage() {
              <h1 className="text-[22px] font-black text-gray-900 leading-tight pr-4">{room.title}</h1>
           </div>
           
-          {/* 🌟 修复点：头像点击跳转已修改为 /user/... */}
-          <div onClick={() => router.push(`/user/${room.author_id}`)} className="flex items-center justify-between mb-6 pb-6 border-b border-gray-100 cursor-pointer hover:bg-gray-50 p-2 -ml-2 rounded-xl transition-colors group">
+          {/* 🌟 房东资料区 (已添加私信按钮) */}
+          <div onClick={() => router.push(`/profile/${room.author_id}`)} className="flex items-center justify-between mb-6 pb-6 border-b border-gray-100 cursor-pointer hover:bg-gray-50 p-2 -ml-2 rounded-xl transition-colors group">
             <div className="flex items-center gap-3">
               <img src={room.author_avatar} className="w-10 h-10 rounded-full bg-gray-100 object-cover group-hover:shadow-md transition-shadow" alt="host" />
               <div>
@@ -672,6 +673,7 @@ export default function RoomDetailPage() {
 
                   <textarea value={guestMessage} onChange={(e) => setGuestMessage(e.target.value)} placeholder="给房东留言，简单介绍一下自己和行程安排..." className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm outline-none focus:border-blue-500 resize-none mt-2" rows={2}></textarea>
                   
+                  {/* 🌟 修改：私聊与申请按钮并排，提升沟通转化率 */}
                   <div className="flex gap-2 mt-2">
                     <button 
                       onClick={() => handleChatWith(room.author_id)}
@@ -696,6 +698,7 @@ export default function RoomDetailPage() {
                  </div>
               )}
               
+              {/* 🌟 即使已申请/已通过，也提供联系房东按钮 */}
               {['pending', 'approved', 'paid'].includes(myBooking?.status) && (
                 <div className="mt-4 pt-4 border-t border-gray-100 flex gap-3">
                   <button onClick={() => handleChatWith(room.author_id)} className="flex-1 py-3.5 rounded-xl font-bold text-[14px] bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors flex items-center justify-center gap-2">
