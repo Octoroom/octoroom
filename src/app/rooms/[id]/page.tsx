@@ -348,7 +348,7 @@ export default function RoomDetailPage() {
         image_urls: [postImage]
       }).eq('octo_room_id', room.id);
 
-      setRoom(prev => ({
+      setRoom((prev: any) => ({
         ...prev, title: editForm.title, city_name: editForm.city, price: finalPrice,
         room_type: editForm.roomType, description: editForm.description, cover_image: coverImageString, amenities: editForm.amenities.join(','),
         address_name: editForm.addressName, latitude: editForm.lat, longitude: editForm.lng
