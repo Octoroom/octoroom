@@ -1,3 +1,30 @@
+/* src/app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 🌟 核心魔法：响应式全局字号缩放 */
+@layer base {
+  /* 默认大屏幕 (例如 23寸+显示器)：基准字号 16px */
+  html {
+    font-size: 16px; 
+  }
+
+  /* 15寸/14寸笔记本 (屏幕宽度 < 1440px)：等比缩小约 12.5% */
+  @media (max-width: 1440px) {
+    html {
+      font-size: 14px; 
+    }
+  }
+
+  /* 小屏幕或高缩放比例笔记本 (屏幕宽度 < 1280px)：等比缩小约 25% */
+  @media (max-width: 1280px) {
+    html {
+      font-size: 12px; 
+    }
+  }
+}
+
 @import "tailwindcss";
 
 :root {
@@ -23,4 +50,13 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* 👇 隐藏滚动条但保留滚动功能的魔法类 */
+.scrollbar-hide::-webkit-scrollbar {
+    display: none; /* Chrome, Safari and Opera */
+}
+.scrollbar-hide {
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
 }
