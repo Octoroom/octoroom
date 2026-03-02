@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
-export const dynamic = 'force-dynamic';
 
 interface Conversation {
   id: string;
@@ -26,7 +25,8 @@ interface Message {
   is_read?: boolean;
 }
 
-export default function MessagesPage() {
+// 1. 将原来的默认导出改为普通函数（内部组件）
+function MessagesContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   
@@ -385,5 +385,20 @@ export default function MessagesPage() {
       </div>
 
     </main>
+  );
+}
+
+// 2. 新建一个外壳组件，用 Suspense 兜底，并作为默认导出
+export default function MessagesPage() {
+  return (
+    <Suspense 
+      fallback={
+        <div className="flex-1 min-h-screen flex items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
+        </div>
+      }
+    >
+      <MessagesContent />
+    </Suspense>
   );
 }
