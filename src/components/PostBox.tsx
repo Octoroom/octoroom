@@ -162,29 +162,55 @@ export default function PostBox() {
       
       // 🌟 智能路由分发 & 漏洞修补
       if (selectedTag === '#城市搭子') {
-        const { error: postError } = await supabase.from('companion_rooms').insert({ 
-          author_id: user.id, // 🌟 核心修复：强制绑定房东 ID
+        // 1. 先创建房间并拿到生成的 ID
+        const { data: newCompanion, error: roomError } = await supabase.from('companion_rooms').insert({ 
+          author_id: user.id, 
           city_name: city, 
           title: title, 
           description: content.trim(), 
           author_name: authorName, 
           author_avatar: authorAvatar,
           reply_count: 0 
+        }).select().single(); // 🔥 这里加入了 .select().single()
+        
+        if (roomError) throw roomError;
+
+        // 2. 同步在 posts 表发一条带有 companion_room_id 的动态
+        const { error: postError } = await supabase.from('posts').insert({
+          content: `【城市搭子招募】\n目的地：${city}\n标题：${title}\n\n${content.trim()}`,
+          author_id: user.id,
+          username: authorName,
+          image_urls: uploadedUrls,
+          companion_room_id: newCompanion.id // 🔥 绑定对应 ID
         });
         if (postError) throw postError;
+
         alert('搭子招募发布成功！请前往左侧【城市搭子】板块查看。');
 
       } else if (selectedTag === '#章鱼房间') {
-        const { error: postError } = await supabase.from('octo_rooms').insert({ 
-          author_id: user.id, // 🌟 核心修复：强制绑定房东 ID
+        // 1. 先创建房源并拿到生成的 ID
+        const { data: newRoom, error: roomError } = await supabase.from('octo_rooms').insert({ 
+          author_id: user.id, 
           city_name: city, 
           title: title, 
           description: content.trim(), 
           author_name: authorName, 
           author_avatar: authorAvatar,
           reply_count: 0 
+        }).select().single(); // 🔥 这里加入了 .select().single()
+        
+        if (roomError) throw roomError;
+
+        // 2. 同步在 posts 表发一条带有 octo_room_id 的动态
+        const { error: postError } = await supabase.from('posts').insert({
+          content: `【精选房源】\n城市：${city}\n标题：${title}\n欢迎点击卡片进入房间查看详情并申请入住！\n\n${content.trim()}`,
+          author_id: user.id,
+          username: authorName,
+          image_urls: uploadedUrls,
+          octo_room_id: newRoom.id // 🔥 绑定对应 ID
         });
         if (postError) throw postError;
+
         alert('章鱼房间发布成功！请前往左侧【章鱼房间】板块查看。');
 
       } else {
