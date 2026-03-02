@@ -15,7 +15,7 @@ interface PopularCity {
   roomCount: number;     
 }
 
-export default function Sidebar(): JSX.Element {
+export default function Sidebar() {
   const { isSignedIn } = useLocalAuth();
   
   const [popularCities, setPopularCities] = useState<PopularCity[]>([]);
