@@ -35,9 +35,10 @@ export default function RootLayout({
               
               {/* 第一列 (左侧)：全局侧边栏 */}
               {/* 🌟 核心修改：加上 hidden md:block，在手机端隐藏原本固定的侧边栏 */}
-              <div className="hidden md:block">
-                <Sidebar />
-              </div>
+              {/* 第一列 (左侧)：全局侧边栏 */}
+<div className="hidden md:block w-[240px] sticky top-0 h-screen border-r border-gray-100">
+  <Sidebar />
+</div>
 
               {/* 第二列 (中间)：动态内容区 */}
               <main className="w-full max-w-[600px] min-h-screen bg-white border-x border-gray-100 shadow-sm relative shrink-0 flex flex-col">
