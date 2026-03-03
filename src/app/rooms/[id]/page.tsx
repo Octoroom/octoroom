@@ -517,7 +517,7 @@ export default function RoomDetailPage() {
           </div>
           
           {/* 🌟 房东资料区 (已添加私信按钮) */}
-          <div onClick={() => router.push(`/profile/${room.author_id}`)} className="flex items-center justify-between mb-6 pb-6 border-b border-gray-100 cursor-pointer hover:bg-gray-50 p-2 -ml-2 rounded-xl transition-colors group">
+          <div onClick={() => router.push(`/user/${room.author_id}`)} className="flex items-center justify-between mb-6 pb-6 border-b border-gray-100 cursor-pointer hover:bg-gray-50 p-2 -ml-2 rounded-xl transition-colors group">
             <div className="flex items-center gap-3">
               <img src={room.author_avatar} className="w-10 h-10 rounded-full bg-gray-100 object-cover group-hover:shadow-md transition-shadow" alt="host" />
               <div>
