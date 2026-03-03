@@ -24,8 +24,7 @@ interface PostListProps {
   onDelete?: (id: string) => void;
 }
 
-// --- 🌟 新增：Jira 风格的对话框组件 ---
-// --- 🌟 新增：Jira 风格的对话框组件 (已更新为 Octoroom 品牌橙色) ---
+// --- 🌟 Jira 风格的对话框组件 (Octoroom 品牌橙色版) ---
 const DialogModal = ({ config }: { config: any }) => {
   const [inputValue, setInputValue] = useState(config?.defaultValue || '');
 
@@ -77,7 +76,7 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
   const [interactions, setInteractions] = useState<Record<string, InteractionState>>({});
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
-  // --- 🌟 新增：对话框状态与 Promise 封装 ---
+  // --- 🌟 对话框状态与 Promise 封装 ---
   const [dialogConfig, setDialogConfig] = useState<any>(null);
 
   const asyncAlert = (title: string, message: string) => {
@@ -113,7 +112,15 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
       handleDelete(post);
       return;
     }
-    if (!currentUserId) { await asyncAlert('提示', '请先登录后再进行操作'); return; }
+    
+    // 🌟 登录拦截优化
+    if (!currentUserId) { 
+      const goToLogin = await asyncConfirm('需要登录', '操作前请先登录，是否现在前往登录页面？');
+      if (goToLogin) {
+        router.push('/login');
+      }
+      return; 
+    }
     
     if (action === 'follow') {
       const current = interactions[post.id] || post._interactions;
@@ -129,7 +136,15 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
   };
 
   const handleInteraction = async (type: string, post: any) => {
-    if (!currentUserId) { await asyncAlert('提示', '请先登录后再进行操作'); return; }
+    // 🌟 登录拦截优化
+    if (!currentUserId) { 
+      const goToLogin = await asyncConfirm('需要登录', '操作前请先登录，是否现在前往登录页面？');
+      if (goToLogin) {
+        router.push('/login');
+      }
+      return; 
+    }
+
     const current = interactions[post.id] || post._interactions;
     let updates = { ...current };
     let table = '';
@@ -144,7 +159,7 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
       table = 'bookmarks';
     } else if (type === '转发') {
       if (!current.repostedByMe) {
-        // 🌟 替换：使用优雅的 Dialog 替代 window.prompt
+        // 🌟 使用优雅的 Dialog 输入转发内容
         const quoteContent = await asyncPrompt('转发动态', `转发 @${post.username || '用户'} 的动态：\n`);
         if (quoteContent === null) return; // 用户点击了取消
 
@@ -152,11 +167,12 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
         updates.reposts = current.reposts + 1;
         table = 'reposts';
 
+        // 🌟 核心修复点：真正插入新帖子到 posts 表
         try {
           const { error: postError } = await supabase.from('posts').insert({
             author_id: currentUserId,
             content: quoteContent,
-            quote_post_id: post.id
+            quote_post_id: post.id // 关联原贴ID
           });
           if (postError) throw postError;
           await asyncAlert('成功', '转发成功！刷新页面后可见。');
@@ -165,7 +181,7 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
           return; 
         }
       } else {
-        // 🌟 替换：使用优雅的 Dialog 替代 window.confirm
+        // 取消转发状态
         const isConfirmed = await asyncConfirm('取消转发', '确定要取消转发状态吗？\n(注: 已经生成的转发动态需手动前往主页删除)');
         if (!isConfirmed) return;
         
@@ -188,7 +204,7 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
   };
 
   const handleDelete = async (post: any) => {
-    // 🌟 替换：使用优雅的 Dialog 替代 window.confirm
+    // 🌟 删除帖子前使用自定义确认框
     const isConfirmed = await asyncConfirm('删除动态', '确定要删除这条动态吗？此操作不可撤销。');
     if (!isConfirmed) return;
 
