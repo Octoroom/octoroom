@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import React from 'react';
 
 // --- 🌟 矢量图标库 ---
 const Icons = {
@@ -19,6 +20,85 @@ type OaStage = 'VIEWING' | 'AUCTION_PREP' | 'CONDITIONAL' | 'DUE_DILIGENCE' | 'U
 interface ServiceProvider {
   id: string; role: 'BROKER' | 'INSPECTOR' | 'LAWYER'; name: string; avatar: string; quote: number; pitch: string; status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
 }
+
+// --- 🌟 专业级房产地图组件 (模仿 Relab NZ) ---
+const PropertyMap = ({ lat, lng, address }: { lat: number, lng: number, address: string }) => {
+  const mapRef = React.useRef<HTMLDivElement>(null);
+  const mapInstance = React.useRef<any>(null);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !mapRef.current || !lat || !lng) return;
+
+    // 动态引入 Leaflet 避免 Next.js 服务端渲染报错
+    import('leaflet').then((L) => {
+      // 引入样式
+      import('leaflet/dist/leaflet.css');
+
+      if (mapInstance.current) return;
+
+      // 初始化地图，层级调高到 18，适合看房产边界
+      const map = L.default.map(mapRef.current).setView([lat, lng], 18);
+
+      // 🗺️ 图层 1: 高清卫星图 (类似 Google Satellite / Relab)
+      // 使用 Esri World Imagery (免费且超高清，无需 API Key)
+      const esriSatellite = L.default.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 20,
+        attribution: 'Tiles &copy; Esri, Maxar, Earthstar Geographics'
+      });
+
+      // 🗺️ 图层 2: LINZ 官方街道与边界图层 (Relab 默认底图风格)
+      // 注意：这里用 OSM 高清版做无 Key 演示。
+      // 如果你要接入真实的 LINZ 数据，去 data.linz.govt.nz 免费申请一个 Key，替换下面的 URL 即可。
+      // 🗺️ 图层 2: LINZ 官方产权边界图 (NZ Primary Parcels - Layer 50772)
+      const linzStyleVector = L.default.tileLayer('https://tiles-a.data-cdn.linz.govt.nz/services;key=db81bf95b3c447608a8bcf4cb35f50ec/tiles/v4/layer=50772/EPSG:3857/{z}/{x}/{y}.png', {
+        maxZoom: 20,
+        attribution: '边界数据 &copy; <a href="https://www.linz.govt.nz/data/linz-data-service">LINZ CC BY 4.0</a>'
+      });
+
+      // 默认展示卫星图
+      esriSatellite.addTo(map);
+
+      // ✨ 默认也将 LINZ 边界线叠加在卫星图上方！
+      linzStyleVector.addTo(map);
+
+      // 修复 Leaflet 默认 Marker 图标丢失问题
+      const icon = L.default.icon({
+        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34],
+      });
+
+      // 添加房产标记点和信息弹窗
+      L.default.marker([lat, lng], { icon }).addTo(map)
+        .bindPopup(`<div class="font-bold text-sm text-gray-900">${address}</div><div class="text-xs text-orange-500 mt-1">查看详细边界</div>`)
+        .openPopup();
+
+      // 🎛️ 核心功能：添加图层控制器 (右上角悬浮)，让用户自己切换
+      // 将 LINZ 边界线作为 "Overlays" (叠加层) 加入，而不是基础底图
+      L.default.control.layers(
+        { "🛰️ 高清卫星图 (Satellite)": esriSatellite }, // 底图 (只能选一个)
+        { "🗺️ LINZ 产权边界线 (Parcels)": linzStyleVector } // 叠加层 (可以打钩开启/关闭)
+      ).addTo(map);
+
+      mapInstance.current = map;
+
+      // 延迟刷新地图大小，防止因为 Tab 切换导致的灰色残缺区块
+      setTimeout(() => { map.invalidateSize(); }, 200);
+    });
+
+    return () => {
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
+      }
+    };
+  }, [lat, lng, address]);
+
+  return <div ref={mapRef} className="w-full h-full z-0" style={{ isolation: 'isolate' }}></div>;
+};
 
 export default function PropertyTradeRoom() {
   const router = useRouter();
@@ -169,11 +249,14 @@ export default function PropertyTradeRoom() {
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" /></svg>
                 </button>
               </div>
-              <div className="h-48 bg-gray-100 relative w-full overflow-hidden border-t border-gray-100">
+              {/* 高度从 h-48 加大到 h-[350px]，更具沉浸感 */}
+              <div className="h-[350px] bg-gray-100 relative w-full overflow-hidden border-t border-gray-100 rounded-b-2xl">
                 {property.latitude && property.longitude ? (
-                  <iframe width="100%" height="100%" style={{ border: 0 }} src={`https://www.openstreetmap.org/export/embed.html?bbox=${osmBbox}&layer=mapnik&marker=${property.latitude}%2C${property.longitude}`}></iframe>
+                  <PropertyMap lat={property.latitude} lng={property.longitude} address={property.address_name} />
                 ) : (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/5"><span className="text-gray-500 text-[13px] font-bold">未提供精准坐标</span></div>
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/5 backdrop-blur-sm">
+                    <span className="text-gray-500 text-[13px] font-bold px-4 py-2 bg-white/80 rounded-full shadow-sm">未提供精准坐标</span>
+                  </div>
                 )}
               </div>
             </div>
