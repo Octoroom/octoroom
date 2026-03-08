@@ -168,6 +168,7 @@ export default function PropertyLobbyPage() {
           properties.map(property => (
             <div 
               key={property.id} 
+              // 注意：点击卡片本身依然是跳转到详情页
               onClick={() => router.push(`/property/${property.id}`)}
               className="bg-white rounded-[20px] overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer border border-gray-100 group"
             >
@@ -219,7 +220,14 @@ export default function PropertyLobbyPage() {
                     <img src={property.authorAvatar} alt="owner" className="w-6 h-6 rounded-full border border-gray-200" />
                     <span className="text-[12px] font-medium text-gray-500">{property.authorName}</span>
                   </div>
-                  <button className="px-4 py-1.5 bg-gray-900 text-white text-[12px] font-bold rounded-full hover:bg-black transition-colors">
+                  {/* 🚨 核心修改点：加入 onClick 并阻止冒泡 */}
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation(); // 阻止触发外层卡片的跳转事件
+                      router.push(`/property/${property.id}/oa`);
+                    }}
+                    className="px-4 py-1.5 bg-gray-900 text-white text-[12px] font-bold rounded-full hover:bg-black transition-colors"
+                  >
                     进入交易室 &rarr;
                   </button>
                 </div>
