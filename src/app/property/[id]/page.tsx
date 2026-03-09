@@ -23,7 +23,13 @@ interface OAStep {
 }
 
 interface ServiceProvider {
-  id: string; role: 'BROKER' | 'INSPECTOR' | 'LAWYER'; name: string; avatar: string; quote: number | string; pitch: string; status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
+  id: string; 
+  role: 'BROKER' | 'INSPECTOR' | 'LAWYER' | 'VALUER' | 'PHOTOGRAPHER' | 'STAGER'; 
+  name: string; 
+  avatar: string; 
+  quote: number | string; 
+  pitch: string; 
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
 }
 
 // --- ⏱️ 倒计时组件 ---
@@ -207,6 +213,9 @@ export default function PropertyTradeRoom() {
     { id: 'p1', role: 'LAWYER', name: 'Jessica Chen', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jessica', quote: '1,500 + GST', pitch: '专精房产交割，代办 LINZ 产权转移及信托账户(Trust Account)托管。', status: 'PENDING' },
     { id: 'p2', role: 'INSPECTOR', name: 'John Doe', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=John', quote: 600, pitch: '拥有15年奥克兰北岸持牌屋检经验，提供加急报告。', status: 'PENDING' },
     { id: 'p3', role: 'BROKER', name: 'Sarah Smith', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sarah', quote: '免费', pitch: '熟悉四大行最新利率，可申请高额返现。', status: 'ACCEPTED' },
+    { id: 'p4', role: 'VALUER', name: 'David Brown', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=David', quote: 850, pitch: '新西兰注册估价师，提供权威银行认可的 Registered Valuation 估值报告。', status: 'PENDING' },
+    { id: 'p5', role: 'PHOTOGRAPHER', name: 'Chloe Wang', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Chloe', quote: 350, pitch: '专业房产摄影，含航拍与高清视频，赠送2D户型图。', status: 'PENDING' },
+    { id: 'p6', role: 'STAGER', name: 'Aura Staging', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Aura', quote: '2,200起 (5周)', pitch: '高端全屋软装布置，提升看房体验，平均帮助房产溢价5%售出。', status: 'PENDING' },
   ]);
 
   // 渲染 Loading 状态
@@ -318,6 +327,7 @@ export default function PropertyTradeRoom() {
   };
 
   const renderWorkflowTimeline = () => {
+    // 🎨 辅助函数：根据角色返回对应的标签样式
     const getRoleBadge = (role: Role) => {
       switch(role) {
         case 'BUYER': return <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-black">买家任务</span>;
@@ -327,21 +337,51 @@ export default function PropertyTradeRoom() {
       }
     };
 
+    // 🧑‍💼 辅助函数：根据角色分配对应的头像
+    const getRoleAvatar = (role: Role) => {
+      switch(role) {
+        case 'BUYER': return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix'; // 模拟当前买家头像
+        case 'SELLER': return property.author_avatar; // 直接使用房源上的卖家头像
+        case 'LAWYER': return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jessica'; // 律师头像 (与服务商列表中一致)
+        case 'SYSTEM': return 'https://api.dicebear.com/7.x/bottts/svg?seed=System'; // 机器人头像代表系统
+        default: return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Default';
+      }
+    };
+
     return (
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in duration-300">
         <h3 className="text-lg font-black text-gray-900 mb-6">交易流追踪 (OA)</h3>
-        <div className="relative border-l-2 border-gray-200 ml-3 space-y-8">
+        
+        {/* 时间轴容器：加宽了左侧 margin 以容纳更大的头像 */}
+        <div className="relative border-l-2 border-gray-100 ml-5 space-y-8">
           {oaSteps.map((step) => (
-            <div key={step.id} className="relative pl-6">
-              <div className={`absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 bg-white flex items-center justify-center ${step.status === 'COMPLETED' ? 'border-green-500 bg-green-500' : step.status === 'IN_PROGRESS' ? 'border-orange-500 ring-4 ring-orange-100' : 'border-gray-300'}`}>
-                {step.status === 'COMPLETED' && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7" /></svg>}
+            <div key={step.id} className="relative pl-8">
+              
+              {/* ✨ 头像与状态圆圈 ✨ */}
+              <div className={`absolute -left-[21px] top-0 w-10 h-10 rounded-full border-4 bg-white flex items-center justify-center z-10 overflow-hidden transition-all ${
+                step.status === 'COMPLETED' ? 'border-green-500' : 
+                step.status === 'IN_PROGRESS' ? 'border-orange-500 shadow-[0_0_0_4px_rgba(249,115,22,0.1)]' : 
+                'border-gray-200 opacity-60'
+              }`}>
+                <img src={getRoleAvatar(step.role)} alt={step.role} className="w-full h-full object-cover bg-gray-50" />
+                
+                {/* 完成状态覆盖一层半透明绿色与打勾图标 */}
+                {step.status === 'COMPLETED' && (
+                  <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center backdrop-blur-[1px]">
+                     <svg className="w-5 h-5 text-green-600 drop-shadow-md" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7" /></svg>
+                  </div>
+                )}
               </div>
+
+              {/* 任务卡片内容 */}
               <div className={`bg-white rounded-[16px] p-4 border transition-all ${step.status === 'IN_PROGRESS' ? 'border-orange-200 shadow-md ring-1 ring-orange-50' : 'border-gray-100 shadow-sm opacity-90'}`}>
                 <div className="flex flex-col gap-1.5 mb-2">
                   {getRoleBadge(step.role)}
                   <h3 className={`text-[15px] font-black ${step.status === 'PENDING' ? 'text-gray-500' : 'text-gray-900'}`}>{step.title}</h3>
                 </div>
                 <p className="text-[13px] text-gray-500 leading-relaxed mb-3">{step.description}</p>
+                
+                {/* 底部：截止日期/完成时间 与 操作按钮 */}
                 <div className="flex items-center justify-between mt-2 pt-3 border-t border-gray-50">
                   {step.status === 'COMPLETED' ? (
                     <span className="text-[12px] font-bold text-green-600 flex items-center gap-1">完成于 {new Date(step.completedAt!).toLocaleDateString()}</span>
@@ -350,6 +390,7 @@ export default function PropertyTradeRoom() {
                   ) : (
                     <span className="text-[12px] font-medium text-gray-400">等待前置任务完成</span>
                   )}
+                  
                   {step.status === 'IN_PROGRESS' && step.role === 'BUYER' && (
                     <button onClick={() => step.title.includes('律师') ? setActiveTab('PROVIDERS') : alert('去处理')} className="bg-orange-500 text-white px-4 py-1.5 rounded-lg text-[12px] font-bold hover:bg-orange-600 transition-colors">
                       {step.title.includes('律师') ? '去大厅选律师 →' : '去处理 →'}
@@ -357,6 +398,7 @@ export default function PropertyTradeRoom() {
                   )}
                 </div>
               </div>
+
             </div>
           ))}
         </div>
@@ -364,38 +406,56 @@ export default function PropertyTradeRoom() {
     );
   };
 
-  const renderProvidersRoom = () => {
+const renderProvidersRoom = () => {
+    // 🎨 辅助函数：根据角色返回对应的中文名和颜色配置
+    const getProviderRoleConfig = (role: string) => {
+      switch(role) {
+        case 'LAWYER': return { label: '过户律师', color: 'bg-emerald-100 text-emerald-700' };
+        case 'INSPECTOR': return { label: '屋检师', color: 'bg-blue-100 text-blue-700' };
+        case 'BROKER': return { label: '贷款Broker', color: 'bg-indigo-100 text-indigo-700' };
+        case 'VALUER': return { label: '注册估价师', color: 'bg-purple-100 text-purple-700' };
+        case 'PHOTOGRAPHER': return { label: '房屋摄影', color: 'bg-pink-100 text-pink-700' };
+        case 'STAGER': return { label: 'Home Staging', color: 'bg-amber-100 text-amber-700' };
+        default: return { label: role, color: 'bg-gray-100 text-gray-700' };
+      }
+    };
+
     return (
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in duration-300">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-black text-gray-900">服务商入驻大厅</h3>
-          <button className="px-4 py-1.5 bg-orange-500 text-white text-sm font-bold rounded-full shadow-md">我是服务商，提交报价</button>
+          <button className="px-4 py-1.5 bg-orange-500 text-white text-sm font-bold rounded-full shadow-md hover:bg-orange-600 transition-colors">我是服务商，提交报价</button>
         </div>
         <div className="space-y-4">
-          {providers.map(provider => (
-            <div key={provider.id} className={`p-4 border rounded-xl transition-colors bg-white shadow-sm ${provider.role === 'LAWYER' ? 'border-emerald-200' : 'border-gray-100'}`}>
-              <div className="flex justify-between items-start mb-3">
-                <div className="flex items-center gap-3">
-                  <img src={provider.avatar} alt="avatar" className="w-10 h-10 rounded-full border border-gray-100 shadow-sm" />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-gray-900 text-[15px]">{provider.name}</span>
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded ${provider.role === 'LAWYER' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-900 text-white'}`}>
-                        {provider.role === 'LAWYER' ? '过户律师' : provider.role === 'INSPECTOR' ? '屋检师' : '贷款Broker'}
-                      </span>
+          {providers.map(provider => {
+            const roleConfig = getProviderRoleConfig(provider.role);
+            
+            return (
+              <div key={provider.id} className={`p-4 border rounded-xl transition-colors bg-white shadow-sm hover:border-orange-200 ${provider.role === 'LAWYER' ? 'border-emerald-200' : 'border-gray-100'}`}>
+                <div className="flex justify-between items-start mb-3">
+                  <div className="flex items-center gap-3">
+                    <img src={provider.avatar} alt="avatar" className="w-10 h-10 rounded-full border border-gray-100 shadow-sm" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-gray-900 text-[15px]">{provider.name}</span>
+                        {/* 使用配置好的颜色和标签 */}
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded ${roleConfig.color}`}>
+                          {roleConfig.label}
+                        </span>
+                      </div>
+                      <div className="text-[12px] text-gray-500 mt-0.5 font-medium">报价: <span className="text-orange-500 font-bold">{provider.quote === '免费' ? provider.quote : `$${provider.quote}`}</span></div>
                     </div>
-                    <div className="text-[12px] text-gray-500 mt-0.5 font-medium">报价: <span className="text-orange-500 font-bold">{provider.quote === '免费' ? provider.quote : `$${provider.quote}`}</span></div>
                   </div>
+                  {provider.status === 'ACCEPTED' ? (
+                    <span className="text-[12px] font-bold text-green-600 bg-green-50 px-2 py-1 rounded border border-green-100">已就绪参与 OA</span>
+                  ) : (
+                    currentUserRole === 'BUYER' && <button className="text-[12px] font-bold text-orange-500 bg-orange-50 hover:bg-orange-100 px-3 py-1.5 rounded-full transition-colors border border-orange-100">邀请进入 OA</button>
+                  )}
                 </div>
-                {provider.status === 'ACCEPTED' ? (
-                  <span className="text-[12px] font-bold text-green-600 bg-green-50 px-2 py-1 rounded border border-green-100">已就绪参与 OA</span>
-                ) : (
-                  currentUserRole === 'BUYER' && <button className="text-[12px] font-bold text-orange-500 bg-orange-50 hover:bg-orange-100 px-3 py-1.5 rounded-full transition-colors border border-orange-100">邀请进入 OA</button>
-                )}
+                <p className="text-[13px] text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100/80 leading-relaxed">“{provider.pitch}”</p>
               </div>
-              <p className="text-[13px] text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100/80 leading-relaxed">“{provider.pitch}”</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     );
