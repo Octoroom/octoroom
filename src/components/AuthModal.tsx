@@ -7,12 +7,21 @@ import { supabase } from '@/lib/supabase';
 export default function AuthModal() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // 🌟 新增 1：添加确认密码的状态变量
+  const [confirmPassword, setConfirmPassword] = useState(''); 
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // 🌟 新增 2：在开启 loading 和发送请求前，先校验两次密码是否一致
+    if (isSignUp && password !== confirmPassword) {
+      alert('提示：两次输入的密码不一致，请重新输入！');
+      return; // 密码不一致直接拦截，不执行后续逻辑
+    }
+
     setLoading(true);
 
     try {
@@ -132,6 +141,17 @@ export default function AuthModal() {
           onChange={(e) => setPassword(e.target.value)}
           required
         />
+        {/* 🌟 新增 3：仅在注册模式下显示确认密码输入框 */}
+        {isSignUp && (
+          <input
+            type="password"
+            placeholder="再次输入密码确认"
+            className="w-full p-3 rounded-xl border border-black focus:shadow-[3px_3px_0px_0px_#FF8C00] focus:-translate-y-[1px] focus:-translate-x-[1px] outline-none transition-all bg-white"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            required
+          />
+        )}
         <button 
           disabled={loading} 
           className="w-full bg-[#FF8C00] text-white py-3 rounded-xl font-bold border border-black shadow-[3px_3px_0px_0px_black] active:shadow-none active:translate-y-[3px] active:translate-x-[3px] transition-all disabled:opacity-50"
@@ -142,7 +162,11 @@ export default function AuthModal() {
       
       <div className="text-center mt-6">
         <button 
-          onClick={() => setIsSignUp(!isSignUp)}
+          onClick={() => {
+            setIsSignUp(!isSignUp);
+            // 🌟 优化：切换模式时清空确认密码，避免数据残留
+            setConfirmPassword(''); 
+          }}
           className="text-xs font-medium text-gray-500 hover:text-[#FF8C00] underline decoration-dotted transition-colors"
           type="button"
         >
