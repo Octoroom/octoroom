@@ -31,21 +31,34 @@ export default function EditPropertyPage() {
 
   const fetchProperty = async () => {
     try {
+      // 1. 检查有没有拿到 URL 里的 ID
+      if (!propertyId) {
+        throw new Error("路由参数为空！请检查文件夹是否被正确命名为了 [id]");
+      }
+
+      // 2. 检查登录状态
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        alert("请先登录");
+        alert("登录状态失效，请重新登录");
         router.push('/');
         return;
       }
 
+      // 3. 去数据库查这个房源 (暂时把 author_id 的强制过滤去掉，用来排错)
       const { data, error } = await supabase
         .from('octo_properties')
         .select('*')
         .eq('id', propertyId)
-        .eq('author_id', user.id) // 确保只能编辑自己的房源
         .single();
 
-      if (error) throw error;
+      if (error) throw error; // 抛出 Supabase 的原生报错
+
+      // 4. 检查权限
+      if (data.author_id !== user.id) {
+         throw new Error(`权限不足: 当前登录账号(${user.id})不是此房源的发布者(${data.author_id})`);
+      }
+
+      // 5. 数据赋值
       if (data) {
         setPropertyInfo(data);
         setFormData({
@@ -59,8 +72,9 @@ export default function EditPropertyPage() {
         });
       }
     } catch (error: any) {
-      console.error("加载失败:", error.message);
-      alert("无法加载房源信息，可能已被删除或无权限。");
+      console.error("加载失败详情:", error);
+      // 把最核心的报错信息直接弹到屏幕上！
+      alert(`无法加载房源 🚨\n\n原因: ${error.message}\n当前房源ID: ${propertyId}`);
       router.push('/my-properties');
     } finally {
       setLoading(false);
