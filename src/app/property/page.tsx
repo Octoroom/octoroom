@@ -239,7 +239,7 @@ export default function PropertyLobbyPage() {
 
       {/* 悬浮发布按钮 */}
       <button 
-        onClick={() => alert('发布房源 Modal 可以接在这里')}
+        onClick={() => router.push('/my-properties')}
         className="fixed bottom-6 right-1/2 translate-x-[240px] md:translate-x-[260px] lg:translate-x-[280px] z-40 bg-orange-500 hover:bg-orange-600 text-white shadow-xl px-5 py-3 rounded-full flex items-center gap-2 transition-transform hover:scale-105"
       >
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
