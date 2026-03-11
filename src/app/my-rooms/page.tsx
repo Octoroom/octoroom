@@ -463,11 +463,31 @@ export default function MyRoomsPage() {
 
   return (
     <main className="flex-1 max-w-[640px] w-full min-h-screen border-r border-gray-100 bg-gray-50 flex flex-col relative pb-10">
-      <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-100 sticky top-0 z-40">
-        <h1 className="text-xl font-black text-gray-900">房东后台</h1>
-        <button onClick={() => setIsPublishModalOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-5 rounded-full shadow-sm flex items-center gap-1.5 text-[14px]">
-          <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>发布新房源
-        </button>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-4 bg-white border-b border-gray-100 sticky top-0 z-40 gap-3">
+        <div>
+          <h1 className="text-xl font-black text-gray-900">房东中心 (出租)</h1>
+          <p className="text-[11px] text-gray-500 font-medium mt-0.5">管理您的长短租房源与订单</p>
+        </div>
+        
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* 卖房按钮 (黑白高冷质感，跳转到卖房专属页) */}
+          <button 
+            onClick={() => router.push('/my-properties')} 
+            className="flex-1 sm:flex-none bg-white text-gray-900 border border-gray-200 hover:bg-gray-50 font-bold py-2 px-4 rounded-full shadow-sm flex items-center justify-center gap-1.5 text-[13px] transition-colors"
+          >
+            <svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
+            去卖房
+          </button>
+
+          {/* 租房按钮 (当前页的主按钮，蓝色强调，点击打开弹窗) */}
+          <button 
+            onClick={() => setIsPublishModalOpen(true)} 
+            className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-full shadow-sm flex items-center justify-center gap-1.5 text-[13px] transition-colors"
+          >
+            <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            发布招租
+          </button>
+        </div>
       </div>
 
       <div className="flex w-full bg-white border-b border-gray-100 sticky top-[69px] z-30">

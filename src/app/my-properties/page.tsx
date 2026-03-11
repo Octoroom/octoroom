@@ -84,14 +84,31 @@ function PropertyCardSlider({ images, viewMode, city, className }: { images: str
   };
 
   return (
-    <div className={`relative bg-gray-100 overflow-hidden group/slider ${className}`}>
-      <div ref={sliderRef} className="w-full h-full flex overflow-x-auto snap-x snap-mandatory scrollbar-hide" onScroll={handleScroll}>
-        {images.map((img, idx) => (
-          <div key={idx} className="w-full h-full flex-shrink-0 snap-center relative">
-            <img src={img} className="w-full h-full object-cover" alt={`cover-${idx}`} />
-            <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/40 to-transparent pointer-events-none"></div>
-          </div>
-        ))}
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-4 bg-white border-b border-gray-100 sticky top-0 z-40 gap-3">
+        <div>
+          <h1 className="text-xl font-black text-gray-900">卖家中心 (出售)</h1>
+          <p className="text-[11px] text-gray-500 font-medium mt-0.5">免中介费直售您的房产</p>
+        </div>
+        
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* 租房按钮 (跳转回租房页) */}
+          <button 
+            onClick={() => router.push('/my-rooms')} 
+            className="flex-1 sm:flex-none bg-white text-gray-900 border border-gray-200 hover:bg-gray-50 font-bold py-2 px-4 rounded-full shadow-sm flex items-center justify-center gap-1.5 text-[13px] transition-colors"
+          >
+            <svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" /></svg>
+            去招租
+          </button>
+
+          {/* 卖房按钮 (当前页的主按钮，黑色强调，点击打开弹窗) */}
+          <button 
+            onClick={() => setIsPublishModalOpen(true)} 
+            className="flex-1 sm:flex-none bg-gray-900 hover:bg-black text-white font-bold py-2 px-4 rounded-full shadow-sm flex items-center justify-center gap-1.5 text-[13px] transition-colors"
+          >
+            <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            发布售房
+          </button>
+        </div>
       </div>
 
       {viewMode === 'grid' && (
