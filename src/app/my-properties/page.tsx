@@ -53,16 +53,16 @@ const buildAwesomePropertyContent = (
 
   return ` 独家直售房源  ${title}
 
- 📍 核心地段：${addrText}
- 🏠 房源户型：${propertyType} (${specText})
- 📐 空间面积：${areaText}
- 💰 交易方式：${priceDisplay}
- ✨ 亮点配置：${features.slice(0, 5).join(' · ') || '极佳状态，诚意出售'}${descText}
+ 核心地段：${addrText}
+ 房源户型：${propertyType} (${specText})
+ 空间面积：${areaText}
+ 交易方式：${priceDisplay}
+ 亮点配置：${features.slice(0, 5).join(' · ') || '极佳状态，诚意出售'}${descText}
 
-房东直售免中介费！查看下方专属卡片了解更多实拍细节与 Open Home 时间，欢迎直接联系咨询。`;
+房东直售免中介费！对这套房子感兴趣的搭子，欢迎直接私信我了解更多详情与 Open Home 安排！`;
 };
 
-// 复用您的轮播图组件 (名字微调)
+// 复用您的轮播图组件
 function PropertyCardSlider({ images, viewMode, city, className }: { images: string[], viewMode: string, city: string, className?: string }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const sliderRef = useRef<HTMLDivElement>(null);
@@ -84,7 +84,6 @@ function PropertyCardSlider({ images, viewMode, city, className }: { images: str
   };
 
   return (
-    // 👇 就是这个最外层的 div，如果没有它，下面的平级标签就会引发编译报错！
     <div className={`relative bg-gray-100 overflow-hidden group/slider ${className}`}>
       
       <div ref={sliderRef} className="w-full h-full flex overflow-x-auto snap-x snap-mandatory scrollbar-hide" onScroll={handleScroll}>
@@ -120,7 +119,7 @@ function PropertyCardSlider({ images, viewMode, city, className }: { images: str
         </>
       )}
       
-    </div> // 👈 不要忘记闭合最外层的 div
+    </div>
   );
 }
 
@@ -146,7 +145,7 @@ export default function MyPropertiesPage() {
   const [customFeatures, setCustomFeatures] = useState<{id: string, label: string}[]>([]);
   const [newFeature, setNewFeature] = useState('');
 
-  // 🌟 为新西兰卖房定制的表单数据结构
+  // 🌟 表单状态中加入 syncToPost 开关，默认为 true
   const [formData, setFormData] = useState({
     city: '', title: '', addressName: '', lat: 0, lng: 0,
     propertyType: '独立别墅 (House)', 
@@ -156,10 +155,10 @@ export default function MyPropertiesPage() {
     features: [] as string[], description: '', 
     imageMode: 'system' as 'system' | 'custom',
     coverImageFiles: [] as File[],        
-    coverImagePreviews: [] as string[]    
+    coverImagePreviews: [] as string[],
+    syncToPost: true // 👈 同步到日常动态开关
   });
 
-  // 新西兰特色房产亮点
   const baseFeatureOptions = [
     { id: 'double_glazing', label: '双层玻璃' }, { id: 'heat_pump', label: '热泵空调' },
     { id: 'fully_fenced', label: '全围栏院子' }, { id: 'internal_garage', label: '内进式车库' },
@@ -173,7 +172,6 @@ export default function MyPropertiesPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setLoading(false); return; }
 
-      // 假设我们有一个 octo_properties 表和 octo_property_enquiries 表
       const { data: propertiesData } = await supabase.from('octo_properties').select('*').eq('author_id', user.id).order('created_at', { ascending: false });
       setProperties(propertiesData || []);
 
@@ -183,15 +181,13 @@ export default function MyPropertiesPage() {
       const savedFeatures = localStorage.getItem('octo_custom_features');
       if (savedFeatures) setCustomFeatures(JSON.parse(savedFeatures));
     } catch (error) { 
-      // 开发阶段如果表还没建，给一些假数据展示效果
-      console.warn("未连接到真实表，使用演示数据", error); 
+      console.warn("数据加载失败", error); 
     } 
     finally { setLoading(false); }
   };
 
   useEffect(() => { fetchData(); }, []);
 
-  // 地图初始化逻辑保持与原版一致
   useEffect(() => {
     if (isPublishModalOpen && mapContainerRef.current && !mapInstanceRef.current) {
       (async () => {
@@ -203,7 +199,7 @@ export default function MyPropertiesPage() {
           shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
         });
 
-        const initialLat = formData.lat || -36.8485; // 奥克兰默认坐标
+        const initialLat = formData.lat || -36.8485; 
         const initialLng = formData.lng || 174.7633;
         
         const map = L.map(mapContainerRef.current!).setView([initialLat, initialLng], formData.lat ? 15 : 12);
@@ -304,7 +300,6 @@ export default function MyPropertiesPage() {
         finalImageUrls = await Promise.all(uploadPromises);
       }
 
-      // 组装最终展示的价格文本
       let finalPriceDisplay = formData.saleMethod;
       if (formData.saleMethod === '一口价' || formData.saleMethod === '询价起点') {
         finalPriceDisplay = `${formData.saleMethod} $${Number(formData.priceAmount).toLocaleString()} ${formData.priceCurrency}`;
@@ -312,7 +307,6 @@ export default function MyPropertiesPage() {
 
       const coverImageString = finalImageUrls.length > 0 ? finalImageUrls.join(',') : null;
 
-      // 插入售房数据结构
       const { data: newProperty, error: insertError } = await supabase.from('octo_properties').insert([{
         author_id: user.id, author_name: userProfile?.username || user.email?.split('@')[0] || '直售房东', author_avatar: userProfile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
         title: formData.title, city_name: formData.city, address_name: formData.addressName,
@@ -327,22 +321,36 @@ export default function MyPropertiesPage() {
 
       if (insertError) throw insertError;
 
-      const postImage = finalImageUrls.length > 0 ? finalImageUrls[0] : `https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=500&q=80&random=${newProperty?.id}`;
-      
-      const featureLabels = formData.features.map(f => baseFeatureOptions.find(b => b.id === f)?.label || f);
-      const postContent = buildAwesomePropertyContent(formData.title, formData.city, formData.addressName, formData.propertyType, formData.saleMethod, formData.priceAmount, formData.bedrooms, formData.bathrooms, formData.carParks, formData.floorArea, formData.landArea, featureLabels, formData.description);
+      // 🌟 修复核心：移除了 posts 表中不存在的 octo_property_id，并加上了强力错误捕获
+      if (formData.syncToPost) {
+        const postImage = finalImageUrls.length > 0 ? finalImageUrls[0] : `https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=500&q=80&random=${newProperty?.id}`;
+        
+        const featureLabels = formData.features.map(f => baseFeatureOptions.find(b => b.id === f)?.label || f);
+        const postContent = buildAwesomePropertyContent(formData.title, formData.city, formData.addressName, formData.propertyType, formData.saleMethod, formData.priceAmount, formData.bedrooms, formData.bathrooms, formData.carParks, formData.floorArea, formData.landArea, featureLabels, formData.description);
 
-      await supabase.from('posts').insert([{
-        author_id: user.id, octo_property_id: newProperty.id, 
-        content: postContent,
-        image_urls: [postImage],
-      }]);
+        // 这里仅插入 author_id, content 和 image_urls
+        const { error: postError } = await supabase.from('posts').insert([{
+          author_id: user.id,
+          content: postContent,
+          image_urls: [postImage],
+        }]);
+
+        // 🚨 如果失败，直接通过 throw 抛出，在页面 alert 显示
+        if (postError) {
+          console.error("同步动态报错详情:", postError);
+          throw new Error("同步到日常动态失败：" + postError.message);
+        }
+      }
 
       setIsPublishModalOpen(false); 
-      // 重置表单
-      setFormData({ city: '', title: '', addressName: '', lat: 0, lng: 0, propertyType: '独立别墅 (House)', bedrooms: 3, bathrooms: 1, carParks: 1, floorArea: '', landArea: '', saleMethod: '一口价', priceAmount: '', priceCurrency: 'NZD', features: [], description: '', imageMode: 'system', coverImageFiles: [], coverImagePreviews: [] });
+      // 重置表单，保持 syncToPost 为 true
+      setFormData({ city: '', title: '', addressName: '', lat: 0, lng: 0, propertyType: '独立别墅 (House)', bedrooms: 3, bathrooms: 1, carParks: 1, floorArea: '', landArea: '', saleMethod: '一口价', priceAmount: '', priceCurrency: 'NZD', features: [], description: '', imageMode: 'system', coverImageFiles: [], coverImagePreviews: [], syncToPost: true });
       fetchData();                 
-    } catch (error: any) { alert("发布失败: " + error.message); } finally { setIsPublishing(false); }
+    } catch (error: any) { 
+      alert("操作提示: " + error.message); 
+    } finally { 
+      setIsPublishing(false); 
+    }
   };
 
   const handleSendReply = async (enquiryId: string) => {
@@ -362,9 +370,7 @@ export default function MyPropertiesPage() {
     } catch (err: any) { alert("发送失败: " + err.message); }
   };
 
-  // 售房数据监控看板 (替代原本的日历)
   const renderPropertyStats = (property: any) => {
-    // 模拟数据展示
     const views = Math.floor(Math.random() * 500) + 50;
     const saves = Math.floor(views * 0.1);
     
@@ -633,11 +639,26 @@ export default function MyPropertiesPage() {
               <div><label className="block text-xs font-bold text-gray-700 mb-1">详尽的房源描述</label><textarea rows={5} placeholder="详细描述房屋的历史、CV估值、学区情况及 Open home 安排..." value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none resize-none focus:ring-2 focus:ring-gray-900/20"></textarea></div>
             </div>
 
-            <div className="p-4 border-t border-gray-100 flex justify-end gap-3 shrink-0">
-              <button onClick={() => setIsPublishModalOpen(false)} className="px-5 py-2 text-sm font-bold text-gray-500 bg-gray-100 rounded-full hover:bg-gray-200 transition">取消</button>
-              <button onClick={handlePublish} disabled={isPublishing} className="px-6 py-2 text-sm font-bold text-white bg-gray-900 rounded-full hover:bg-black transition shadow-sm">
-                {isPublishing ? '提交中...' : '确认挂牌发布'}
-              </button>
+            <div className="p-4 border-t border-gray-100 bg-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 rounded-b-[24px]">
+              {/* 🌟 左侧：同步到动态的开关 */}
+              <label className="flex items-center gap-2.5 cursor-pointer group w-fit">
+                <div className={`w-5 h-5 rounded flex items-center justify-center transition-colors border shadow-sm ${formData.syncToPost ? 'bg-orange-500 border-orange-500' : 'bg-white border-gray-300 group-hover:border-orange-400'}`}>
+                  {formData.syncToPost && <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                </div>
+                <div className="flex flex-col text-left">
+                  <span className="text-[13px] font-bold text-gray-800 group-hover:text-orange-600 transition-colors">同步发布到日常动态</span>
+                  <span className="text-[10px] text-gray-500 font-medium hidden sm:block">让章鱼社区的搭子们第一时间看到</span>
+                </div>
+                <input type="checkbox" className="hidden" checked={formData.syncToPost} onChange={(e) => setFormData({...formData, syncToPost: e.target.checked})} />
+              </label>
+
+              {/* 右侧：操作按钮 */}
+              <div className="flex items-center gap-3 self-end sm:self-auto">
+                <button onClick={() => setIsPublishModalOpen(false)} className="px-5 py-2 text-sm font-bold text-gray-500 bg-white border border-gray-200 rounded-full hover:bg-gray-100 transition shadow-sm">取消</button>
+                <button onClick={handlePublish} disabled={isPublishing} className="px-6 py-2 text-sm font-bold text-white bg-gray-900 rounded-full hover:bg-black transition shadow-sm disabled:opacity-50">
+                  {isPublishing ? '提交中...' : '确认挂牌发布'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import React from 'react';
+import { supabase } from '@/lib/supabase';
 
 // --- 🌟 矢量图标库 ---
 const Icons = {
@@ -32,7 +33,7 @@ interface ServiceProvider {
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
 }
 
-// --- ⏱️ 倒计时组件 ---
+// --- ⏱️ 倒计时组件 (已修复并复原) ---
 function CountdownBadge({ dueDate, status }: { dueDate: string; status: StepStatus }) {
   const [timeLeft, setTimeLeft] = useState('');
   const [isOverdue, setIsOverdue] = useState(false);
@@ -45,17 +46,17 @@ function CountdownBadge({ dueDate, status }: { dueDate: string; status: StepStat
       const days = Math.floor(distance / (1000 * 60 * 60 * 24));
       const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
       const mins = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-      setTimeLeft(`${days}天 ${hours}小时 ${mins}分`);
+      setTimeLeft(`${days > 0 ? days + '天 ' : ''}${hours}小时 ${mins}分`);
     }, 1000);
     return () => clearInterval(timer);
   }, [dueDate, status]);
 
   if (status === 'COMPLETED') return null;
   return (
-    <div className={`flex items-center gap-1 mt-2 px-2.5 py-1 w-max rounded-md text-[12px] font-bold ${isOverdue ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-orange-50 text-orange-600 border border-orange-100'}`}>
+    <span className={`text-[12px] font-bold flex items-center gap-1 ${isOverdue ? 'text-red-500' : 'text-orange-500'}`}>
       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-      {isOverdue ? '逾期' : '剩余: '} {timeLeft}
-    </div>
+      {isOverdue ? '已逾期' : `剩余: ${timeLeft}`}
+    </span>
   );
 }
 
@@ -121,80 +122,96 @@ const PropertyMap = ({ lat, lng, address }: { lat: number, lng: number, address:
   );
 };
 
-// ==========================================
-// 🗄️ 模拟前端数据库 (Mock Database)
-// ==========================================
-const mockDatabase: Record<string, any> = {
-  'prop_123': {
-    id: 'prop_123',
-    title: '奥克兰北岸 3房2卫 全海景别墅',
-    address_name: '12 Marine Parade, Takapuna, Auckland',
-    price: '1,250,000 NZD',
-    type: 'NEGOTIATION',
-    images: ['https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=800&q=80'],
-    author_name: 'Alex.W',
-    author_avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Alex',
-    description: '绝佳的北岸海景别墅，走路5分钟可达海滩。处于顶级双校网内（西湖男校、西湖女校）。房东由于工作调动急售，诚意议价。',
-    amenities: 'wifi,ac,kitchen,bathroom',
-    bedrooms: 3, bathrooms: 2, carparks: 2, land_area: '650 sqm',
-    latitude: -36.7885, longitude: 174.7733
-  },
-  'prop_456': {
-    id: 'prop_456',
-    title: '全新联排，首套房首选，随时交割',
-    address_name: '45 Hobsonville Point Rd, Auckland',
-    price: 'Auction (拍卖)',
-    type: 'AUCTION',
-    images: ['https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=800&q=80'],
-    author_name: 'Sarah.J',
-    author_avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sarah',
-    description: 'Hobsonville Point 核心区域全新联排，Master Build 10年质保。不走繁琐议价流程，直接公开拍卖，欢迎所有买家竞标！',
-    amenities: 'wifi,kitchen,bathroom,washer',
-    bedrooms: 2, bathrooms: 1, carparks: 1, land_area: '120 sqm',
-    latitude: -36.7950, longitude: 174.6580 // Hobsonville 坐标
-  },
-  'prop_789': {
-    id: 'prop_789',
-    title: '中区大地潜力盘，带资源许可(RC)',
-    address_name: '88 Remuera Rd, Remuera, Auckland',
-    price: '2,800,000 NZD',
-    type: 'FIXED_PRICE',
-    images: ['https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?auto=format&fit=crop&w=800&q=80'],
-    author_name: 'David.M',
-    author_avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=David',
-    description: 'Remuera 极品大地，已下发可分割3套的 Resource Consent。极其适合开发商或有建房计划的买家。一口价出售，先到先得。',
-    amenities: 'wifi,ac,kitchen,bathroom,workspace',
-    bedrooms: 4, bathrooms: 3, carparks: 4, land_area: '1012 sqm',
-    latitude: -36.8810, longitude: 174.8010 // Remuera 坐标
-  }
-};
 
-
+// ==========================================
+// 🌟 主组件：交易室页面
+// ==========================================
 export default function PropertyTradeRoom() {
   const router = useRouter();
   const params = useParams();
   const propertyId = params?.id as string;
   const currentUserRole = 'BUYER'; 
   
-  // 🌟 将静态数据替换为状态
   const [property, setProperty] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState<'DETAILS' | 'WORKFLOW' | 'PROVIDERS'>('DETAILS');
   const [currentImgIndex, setCurrentImgIndex] = useState(0);
 
-  // 🌟 模拟从 Supabase 获取数据 (使用 useEffect)
+  // 🌟 从 Supabase 获取真实数据 (修复了作用域错误)
   useEffect(() => {
-    setIsLoading(true);
-    // 模拟网络延迟 0.5 秒
-    setTimeout(() => {
-      if (propertyId && mockDatabase[propertyId]) {
-        setProperty(mockDatabase[propertyId]);
-      } else {
-        setProperty(null); // 如果随便输入了一个不存在的 ID
+    const fetchProperty = async () => {
+      setIsLoading(true);
+      try {
+        if (!propertyId) return;
+
+        const { data: item, error } = await supabase
+          .from('octo_properties')
+          .select('*')
+          .eq('id', propertyId)
+          .single();
+
+        if (error) {
+          alert(`🚨 查询失败！\n\n房源ID: ${propertyId}\n错误原因: ${error.message}`);
+          console.error("查询失败:", error.message);
+          setProperty(null);
+          return;
+        }
+
+        if (item) {
+          const featureMap: Record<string, string> = {
+            double_glazing: '双层玻璃',
+            heat_pump: '热泵空调',
+            fully_fenced: '全围栏院子',
+            internal_garage: '内进式车库',
+            ensuite: '主人套房',
+            new_renovation: '近期翻新',
+            freehold: '永久产权'
+          };
+          
+          const formattedAmenities = item.features 
+            ? item.features.split(',').map((f: string) => featureMap[f.trim()] || f.trim()).join(',') 
+            : '';
+
+          let uiType = 'FIXED_PRICE';
+          if (item.sale_method === '拍卖') uiType = 'AUCTION';
+          if (item.sale_method === '议价') uiType = 'NEGOTIATION';
+          
+          let coverImages = ['https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=800&q=80'];
+          if (item.cover_image) {
+            const urls = item.cover_image.split(',').map((s: string) => s.trim());
+            if (urls.length > 0 && urls[0]) coverImages = urls;
+          }
+
+          setProperty({
+            id: item.id,
+            title: item.title,
+            address_name: item.address_name || item.city_name,
+            price: item.price_display || '面议',
+            type: uiType,
+            images: coverImages,
+            author_id: item.author_id,
+            author_name: item.author_name || '房东直售',
+            author_avatar: item.author_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${item.id}`,
+            description: item.description || '',
+            amenities: formattedAmenities,
+            bedrooms: item.bedrooms || 0,
+            bathrooms: item.bathrooms || 0,
+            carparks: item.car_parks || 0,
+            land_area: item.land_area ? `${item.land_area} m²` : '',
+            latitude: item.latitude,
+            longitude: item.longitude
+          });
+        }
+      } catch (err: any) {
+        console.error("发生错误:", err);
+        setProperty(null);
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
-    }, 500);
+    };
+
+    fetchProperty();
   }, [propertyId]);
 
   // OA 数据
@@ -272,7 +289,11 @@ export default function PropertyTradeRoom() {
               </div>
             </div>
           </div>
-          <button onClick={() => alert('跳转私聊')} className="w-10 h-10 rounded-full bg-orange-50 text-orange-600 flex items-center justify-center hover:bg-orange-100 hover:scale-105 transition-all shadow-sm">
+          {/* 👇 替换这个按钮 */}
+          <button 
+            onClick={() => router.push(`/messages?chatWith=${property.author_id}`)} 
+            className="w-10 h-10 rounded-full bg-orange-50 text-orange-600 flex items-center justify-center hover:bg-orange-100 hover:scale-105 transition-all shadow-sm"
+          >
             <svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>
           </button>
         </div>
@@ -327,7 +348,6 @@ export default function PropertyTradeRoom() {
   };
 
   const renderWorkflowTimeline = () => {
-    // 🎨 辅助函数：根据角色返回对应的标签样式
     const getRoleBadge = (role: Role) => {
       switch(role) {
         case 'BUYER': return <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-black">买家任务</span>;
@@ -337,13 +357,12 @@ export default function PropertyTradeRoom() {
       }
     };
 
-    // 🧑‍💼 辅助函数：根据角色分配对应的头像
     const getRoleAvatar = (role: Role) => {
       switch(role) {
-        case 'BUYER': return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix'; // 模拟当前买家头像
-        case 'SELLER': return property.author_avatar; // 直接使用房源上的卖家头像
-        case 'LAWYER': return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jessica'; // 律师头像 (与服务商列表中一致)
-        case 'SYSTEM': return 'https://api.dicebear.com/7.x/bottts/svg?seed=System'; // 机器人头像代表系统
+        case 'BUYER': return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix';
+        case 'SELLER': return property.author_avatar;
+        case 'LAWYER': return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jessica';
+        case 'SYSTEM': return 'https://api.dicebear.com/7.x/bottts/svg?seed=System';
         default: return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Default';
       }
     };
@@ -352,12 +371,10 @@ export default function PropertyTradeRoom() {
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in duration-300">
         <h3 className="text-lg font-black text-gray-900 mb-6">交易流追踪 (OA)</h3>
         
-        {/* 时间轴容器：加宽了左侧 margin 以容纳更大的头像 */}
         <div className="relative border-l-2 border-gray-100 ml-5 space-y-8">
           {oaSteps.map((step) => (
             <div key={step.id} className="relative pl-8">
               
-              {/* ✨ 头像与状态圆圈 ✨ */}
               <div className={`absolute -left-[21px] top-0 w-10 h-10 rounded-full border-4 bg-white flex items-center justify-center z-10 overflow-hidden transition-all ${
                 step.status === 'COMPLETED' ? 'border-green-500' : 
                 step.status === 'IN_PROGRESS' ? 'border-orange-500 shadow-[0_0_0_4px_rgba(249,115,22,0.1)]' : 
@@ -365,7 +382,6 @@ export default function PropertyTradeRoom() {
               }`}>
                 <img src={getRoleAvatar(step.role)} alt={step.role} className="w-full h-full object-cover bg-gray-50" />
                 
-                {/* 完成状态覆盖一层半透明绿色与打勾图标 */}
                 {step.status === 'COMPLETED' && (
                   <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center backdrop-blur-[1px]">
                      <svg className="w-5 h-5 text-green-600 drop-shadow-md" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7" /></svg>
@@ -373,7 +389,6 @@ export default function PropertyTradeRoom() {
                 )}
               </div>
 
-              {/* 任务卡片内容 */}
               <div className={`bg-white rounded-[16px] p-4 border transition-all ${step.status === 'IN_PROGRESS' ? 'border-orange-200 shadow-md ring-1 ring-orange-50' : 'border-gray-100 shadow-sm opacity-90'}`}>
                 <div className="flex flex-col gap-1.5 mb-2">
                   {getRoleBadge(step.role)}
@@ -381,7 +396,6 @@ export default function PropertyTradeRoom() {
                 </div>
                 <p className="text-[13px] text-gray-500 leading-relaxed mb-3">{step.description}</p>
                 
-                {/* 底部：截止日期/完成时间 与 操作按钮 */}
                 <div className="flex items-center justify-between mt-2 pt-3 border-t border-gray-50">
                   {step.status === 'COMPLETED' ? (
                     <span className="text-[12px] font-bold text-green-600 flex items-center gap-1">完成于 {new Date(step.completedAt!).toLocaleDateString()}</span>
@@ -407,7 +421,6 @@ export default function PropertyTradeRoom() {
   };
 
 const renderProvidersRoom = () => {
-    // 🎨 辅助函数：根据角色返回对应的中文名和颜色配置
     const getProviderRoleConfig = (role: string) => {
       switch(role) {
         case 'LAWYER': return { label: '过户律师', color: 'bg-emerald-100 text-emerald-700' };
@@ -438,7 +451,6 @@ const renderProvidersRoom = () => {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-gray-900 text-[15px]">{provider.name}</span>
-                        {/* 使用配置好的颜色和标签 */}
                         <span className={`text-[10px] font-black px-2 py-0.5 rounded ${roleConfig.color}`}>
                           {roleConfig.label}
                         </span>

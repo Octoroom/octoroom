@@ -48,7 +48,7 @@ const getDisplayImages = (room: any) => {
   return [roomImages[idx1], roomImages[idx2], roomImages[idx3]];
 };
 
-// 🌟 企业级高级质感文案引擎：舍弃表情包，采用极简几何符号进行专业排版
+// 🌟 企业级高级质感文案引擎
 const buildAwesomePostContent = (title: string, city: string, addressName: string, roomType: string, rentMode: string, price: string, amenities: string[], description: string) => {
   const facilityMap: Record<string, string> = {
     wifi: '高速网络', ac: '冷暖空调', kitchen: '全套厨房',
@@ -142,7 +142,6 @@ export default function MyRoomsPage() {
   
   const [isGeocoding, setIsGeocoding] = useState(false);
   
-  // 🌟 FIX 3: Use the imported types here
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<LeafletMap | null>(null);
   const markerRef = useRef<LeafletMarker | null>(null);
@@ -152,13 +151,15 @@ export default function MyRoomsPage() {
   const [customAmenities, setCustomAmenities] = useState<{id: string, label: string}[]>([]);
   const [newAmenity, setNewAmenity] = useState('');
 
+  // 🌟 加入了 syncToPost 状态
   const [formData, setFormData] = useState({
     city: '', title: '', availableDate: '', priceAmount: '', priceCurrency: 'NZD',
     roomType: '独立单间', amenities: [] as string[], description: '', rentMode: 'entire', totalRooms: 1,
     addressName: '', lat: 0, lng: 0, 
     imageMode: 'system' as 'system' | 'custom',
     coverImageFiles: [] as File[],        
-    coverImagePreviews: [] as string[]    
+    coverImagePreviews: [] as string[],
+    syncToPost: true // 👈 默认勾选同步到日常动态
   });
 
   const baseFacilityOptions = [
@@ -187,13 +188,11 @@ export default function MyRoomsPage() {
 
   useEffect(() => { fetchData(); }, []);
 
-  // 🌟 FIX 4: Dynamically import Leaflet inside useEffect
   useEffect(() => {
     if (isPublishModalOpen && mapContainerRef.current && !mapInstanceRef.current) {
       (async () => {
         const L = (await import('leaflet')).default;
 
-        // Fix the icons
         delete (L.Icon.Default.prototype as any)._getIconUrl;
         L.Icon.Default.mergeOptions({
           iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -238,7 +237,6 @@ export default function MyRoomsPage() {
     };
   }, [isPublishModalOpen]);
 
-  // 🌟 FIX 5: Dynamically import Leaflet inside handleGeocode
   const handleGeocode = async (e: React.MouseEvent) => {
     e.preventDefault(); 
     if (!formData.addressName.trim()) { alert("请先输入具体地址哦！"); return; }
@@ -298,6 +296,7 @@ export default function MyRoomsPage() {
     });
   };
 
+  // 🌟 同步发布的核心逻辑
   const handlePublish = async () => {
     if (!formData.title.trim() || !formData.city.trim() || !formData.priceAmount.trim()) { alert("请填写房源城市、标题和价格！"); return; }
     if (formData.imageMode === 'custom' && formData.coverImageFiles.length === 0) { alert("请至少上传一张房源图片！"); return; }
@@ -335,20 +334,30 @@ export default function MyRoomsPage() {
 
       if (insertError) throw insertError;
 
-      const postImage = finalImageUrls.length > 0 ? finalImageUrls[0] : `https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=500&q=80&random=${newRoom?.id}`;
-      
-      const postContent = buildAwesomePostContent(formData.title, formData.city, formData.addressName, formData.roomType, formData.rentMode, finalPrice, formData.amenities, formData.description);
+      // 🌟 根据用户的勾选，决定是否同步发布到日常动态，加入详细报错拦截
+      if (formData.syncToPost) {
+        const postImage = finalImageUrls.length > 0 ? finalImageUrls[0] : `https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=500&q=80&random=${newRoom?.id}`;
+        
+        const postContent = buildAwesomePostContent(formData.title, formData.city, formData.addressName, formData.roomType, formData.rentMode, finalPrice, formData.amenities, formData.description);
 
-      await supabase.from('posts').insert([{
-        author_id: user.id, octo_room_id: newRoom.id, 
-        content: postContent,
-        image_urls: [postImage],
-      }]);
+        const { error: postError } = await supabase.from('posts').insert([{
+          author_id: user.id, 
+          octo_room_id: newRoom.id, // 租房模块是有这个字段的，可以直接关联
+          content: postContent,
+          image_urls: [postImage],
+        }]);
+
+        if (postError) {
+          console.error("同步动态报错详情:", postError);
+          throw new Error("同步到日常动态失败：" + postError.message);
+        }
+      }
 
       setIsPublishModalOpen(false); 
-      setFormData({ city: '', title: '', availableDate: '', priceAmount: '', priceCurrency: 'NZD', roomType: '独立单间', amenities: [], description: '', rentMode: 'entire', totalRooms: 1, addressName: '', lat: 0, lng: 0, imageMode: 'system', coverImageFiles: [], coverImagePreviews: [] });
+      // 🌟 重置表单时保留 syncToPost: true
+      setFormData({ city: '', title: '', availableDate: '', priceAmount: '', priceCurrency: 'NZD', roomType: '独立单间', amenities: [], description: '', rentMode: 'entire', totalRooms: 1, addressName: '', lat: 0, lng: 0, imageMode: 'system', coverImageFiles: [], coverImagePreviews: [], syncToPost: true });
       fetchData();                 
-    } catch (error: any) { alert("发布失败: " + error.message); } finally { setIsPublishing(false); }
+    } catch (error: any) { alert("操作提示: " + error.message); } finally { setIsPublishing(false); }
   };
 
   const handleApproval = async (bookingId: string, newStatus: 'approved' | 'rejected') => {
@@ -779,11 +788,26 @@ export default function MyRoomsPage() {
               <div><label className="block text-xs font-bold text-gray-700 mb-1">详细描述</label><textarea rows={3} placeholder="介绍房源亮点以及对租客的期望..." value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none resize-none focus:ring-2 focus:ring-blue-500/20"></textarea></div>
             </div>
 
-            <div className="p-4 border-t border-gray-100 flex justify-end gap-3 shrink-0">
-              <button onClick={() => setIsPublishModalOpen(false)} className="px-5 py-2 text-sm font-bold text-gray-500 bg-gray-100 rounded-full hover:bg-gray-200 transition">取消</button>
-              <button onClick={handlePublish} disabled={isPublishing} className="px-6 py-2 text-sm font-bold text-white bg-blue-600 rounded-full hover:bg-blue-700 transition shadow-sm">
-                {isPublishing ? '发布中...' : '确认发布'}
-              </button>
+            <div className="p-4 border-t border-gray-100 bg-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 rounded-b-[24px]">
+              {/* 🌟 左侧：同步到动态的开关 (Octoroom 租房蓝色版) */}
+              <label className="flex items-center gap-2.5 cursor-pointer group w-fit">
+                <div className={`w-5 h-5 rounded flex items-center justify-center transition-colors border shadow-sm ${formData.syncToPost ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-300 group-hover:border-blue-400'}`}>
+                  {formData.syncToPost && <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                </div>
+                <div className="flex flex-col text-left">
+                  <span className="text-[13px] font-bold text-gray-800 group-hover:text-blue-600 transition-colors">同步发布到日常动态</span>
+                  <span className="text-[10px] text-gray-500 font-medium hidden sm:block">让章鱼社区的搭子们第一时间看到</span>
+                </div>
+                <input type="checkbox" className="hidden" checked={formData.syncToPost} onChange={(e) => setFormData({...formData, syncToPost: e.target.checked})} />
+              </label>
+
+              {/* 右侧：操作按钮 */}
+              <div className="flex items-center gap-3 self-end sm:self-auto">
+                <button onClick={() => setIsPublishModalOpen(false)} className="px-5 py-2 text-sm font-bold text-gray-500 bg-white border border-gray-200 rounded-full hover:bg-gray-100 transition shadow-sm">取消</button>
+                <button onClick={handlePublish} disabled={isPublishing} className="px-6 py-2 text-sm font-bold text-white bg-blue-600 rounded-full hover:bg-blue-700 transition shadow-sm disabled:opacity-50">
+                  {isPublishing ? '发布中...' : '确认发布'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
