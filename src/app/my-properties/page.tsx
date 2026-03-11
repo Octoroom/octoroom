@@ -426,7 +426,7 @@ export default function MyPropertiesPage() {
               <div className={viewMode === 'grid' ? "columns-2 gap-3 space-y-3" : "flex flex-col gap-4"}>
                 {properties.map((prop) => (
                   <div key={prop.id} className={`bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-md border border-gray-100 transition-all ${viewMode === 'list' ? 'flex flex-col sm:flex-row p-3 gap-4 items-stretch' : 'flex flex-col'}`}>
-                    <div onClick={() => router.push(`/properties/${prop.id}`)} className={`cursor-pointer flex flex-col ${viewMode === 'list' ? "w-full sm:w-56 flex-shrink-0" : "w-full"}`}>
+                    <div onClick={() => router.push(`/my-properties/${prop.id}}`)} className={`cursor-pointer flex flex-col ${viewMode === 'list' ? "w-full sm:w-56 flex-shrink-0" : "w-full"}`}>
                       <PropertyCardSlider images={getDisplayImages(prop)} viewMode={viewMode} city={prop.address_name || prop.city_name} className={viewMode === 'list' ? "w-full h-48 sm:h-36 rounded-xl" : "w-full aspect-[4/3] rounded-t-[12px]"} />
                       <div className={viewMode === 'list' ? "py-2" : "px-4 pt-3 pb-2"}>
                         <div className="flex items-center gap-2 mb-1">
