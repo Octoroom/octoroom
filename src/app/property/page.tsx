@@ -31,35 +31,41 @@ export default function PropertyLobbyPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'ALL' | 'AUCTION' | 'MINE'>('ALL');
   
-  // 模拟数据加载
+
   // 真实连接 Supabase 数据库拉取房源
+  // 真实连接 Supabase 数据库拉取房源 (带弹窗检测版)
   useEffect(() => {
     const fetchRealProperties = async () => {
       setLoading(true);
       try {
-        // 从刚建好的 octo_properties 表拉取所有房源，按最新时间排序
         const { data, error } = await supabase
           .from('octo_properties')
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (error) throw error;
+        // 🚨 调试弹窗 1：如果后端报错，直接弹出来！
+        if (error) {
+          alert("❌ 数据库请求报错：\n" + error.message);
+          throw error;
+        }
 
-        if (data) {
-          // 将数据库里的字段，映射为你 UI 组件需要的格式
+        // 🚨 调试弹窗 2：如果没有报错，但数据是空的，说明被 RLS 权限拦截了！
+        if (!data || data.length === 0) {
+          alert("⚠️ 请求成功了，但查到的数据是 0 条！\n这说明极大概率是 Supabase 的 RLS 权限没放开读取，导致你的账号看不到这套房。");
+        } else {
+          // alert("✅ 成功抓取到了 " + data.length + " 条数据！准备渲染...");
+        }
+
+        if (data && data.length > 0) {
           const formattedData: PropertyListing[] = data.map((item: any) => {
-            
-            // 映射售卖方式到 UI 的 Badge 类型
             let uiType: 'AUCTION' | 'NEGOTIATION' | 'FIXED_PRICE' = 'FIXED_PRICE';
             if (item.sale_method === '拍卖') uiType = 'AUCTION';
             if (item.sale_method === '议价') uiType = 'NEGOTIATION';
 
-            // 映射房屋状态到 UI 的状态
             let uiStatus: 'PRE_LAUNCH' | 'VIEWING' | 'UNDER_CONTRACT' | 'SOLD' = 'VIEWING';
             if (item.status === 'under_contract') uiStatus = 'UNDER_CONTRACT';
             if (item.status === 'sold') uiStatus = 'SOLD';
             
-            // 提取首张图片，如果没有则给一张兜底网图
             let coverImg = 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=800&q=80';
             if (item.cover_image) {
               const urls = item.cover_image.split(',').map((s:string) => s.trim());
@@ -72,7 +78,7 @@ export default function PropertyLobbyPage() {
               address: item.address_name || item.city_name,
               city: item.city_name,
               price: item.price_display || '面议',
-              cvPrice: undefined, // 目前表里没有政府CV估价，先留空
+              cvPrice: undefined, 
               type: uiType,
               status: uiStatus,
               bedrooms: item.bedrooms || 0,
@@ -81,7 +87,7 @@ export default function PropertyLobbyPage() {
               coverImage: coverImg,
               authorName: item.author_name || '房东直售',
               authorAvatar: item.author_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${item.id}`,
-              views: Math.floor(Math.random() * 200) + 10 // 模拟一下浏览量让页面好看点
+              views: Math.floor(Math.random() * 200) + 10
             };
           });
           
