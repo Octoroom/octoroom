@@ -32,64 +32,69 @@ export default function PropertyLobbyPage() {
   const [activeTab, setActiveTab] = useState<'ALL' | 'AUCTION' | 'MINE'>('ALL');
   
   // 模拟数据加载
+  // 真实连接 Supabase 数据库拉取房源
   useEffect(() => {
-    setLoading(true);
-    // 这里未来替换为 Supabase 的真实请求
-    setTimeout(() => {
-      setProperties([
-        {
-          id: 'prop_123',
-          title: '北岸全海景，校网覆盖',
-          address: '12 Marine Parade, Takapuna',
-          city: 'Auckland',
-          price: '1,250,000 NZD',
-          cvPrice: '1,100,000 NZD',
-          type: 'NEGOTIATION',
-          status: 'VIEWING',
-          bedrooms: 3,
-          bathrooms: 2,
-          carparks: 2,
-          coverImage: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=800&q=80',
-          authorName: 'Alex.W (房东直售)',
-          authorAvatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Alex',
-          views: 342
-        },
-        {
-          id: 'prop_456',
-          title: '全新联排，首套房首选，随时交割',
-          address: '45 Hobsonville Point Rd',
-          city: 'Auckland',
-          price: 'Auction (拍卖)',
-          type: 'AUCTION',
-          status: 'PRE_LAUNCH',
-          bedrooms: 2,
-          bathrooms: 1,
-          carparks: 1,
-          coverImage: 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=800&q=80',
-          authorName: 'Sarah.J (房东直售)',
-          authorAvatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sarah',
-          views: 890,
-          biddersCount: 12
-        },
-        {
-          id: 'prop_789',
-          title: '中区大地潜力盘，带资源许可(RC)',
-          address: '88 Remuera Rd, Remuera',
-          city: 'Auckland',
-          price: '2,800,000 NZD',
-          type: 'FIXED_PRICE',
-          status: 'UNDER_CONTRACT',
-          bedrooms: 4,
-          bathrooms: 3,
-          carparks: 4,
-          coverImage: 'https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?auto=format&fit=crop&w=800&q=80',
-          authorName: 'David.M (房东直售)',
-          authorAvatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=David',
-          views: 1205
+    const fetchRealProperties = async () => {
+      setLoading(true);
+      try {
+        // 从刚建好的 octo_properties 表拉取所有房源，按最新时间排序
+        const { data, error } = await supabase
+          .from('octo_properties')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        if (data) {
+          // 将数据库里的字段，映射为你 UI 组件需要的格式
+          const formattedData: PropertyListing[] = data.map((item: any) => {
+            
+            // 映射售卖方式到 UI 的 Badge 类型
+            let uiType: 'AUCTION' | 'NEGOTIATION' | 'FIXED_PRICE' = 'FIXED_PRICE';
+            if (item.sale_method === '拍卖') uiType = 'AUCTION';
+            if (item.sale_method === '议价') uiType = 'NEGOTIATION';
+
+            // 映射房屋状态到 UI 的状态
+            let uiStatus: 'PRE_LAUNCH' | 'VIEWING' | 'UNDER_CONTRACT' | 'SOLD' = 'VIEWING';
+            if (item.status === 'under_contract') uiStatus = 'UNDER_CONTRACT';
+            if (item.status === 'sold') uiStatus = 'SOLD';
+            
+            // 提取首张图片，如果没有则给一张兜底网图
+            let coverImg = 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=800&q=80';
+            if (item.cover_image) {
+              const urls = item.cover_image.split(',').map((s:string) => s.trim());
+              if (urls.length > 0 && urls[0]) coverImg = urls[0];
+            }
+
+            return {
+              id: item.id,
+              title: item.title,
+              address: item.address_name || item.city_name,
+              city: item.city_name,
+              price: item.price_display || '面议',
+              cvPrice: undefined, // 目前表里没有政府CV估价，先留空
+              type: uiType,
+              status: uiStatus,
+              bedrooms: item.bedrooms || 0,
+              bathrooms: item.bathrooms || 0,
+              carparks: item.car_parks || 0,
+              coverImage: coverImg,
+              authorName: item.author_name || '房东直售',
+              authorAvatar: item.author_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${item.id}`,
+              views: Math.floor(Math.random() * 200) + 10 // 模拟一下浏览量让页面好看点
+            };
+          });
+          
+          setProperties(formattedData);
         }
-      ]);
-      setLoading(false);
-    }, 600);
+      } catch (err: any) {
+        console.error("加载真实房源失败:", err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRealProperties();
   }, []);
 
   const getStatusBadge = (status: PropertyListing['status']) => {
