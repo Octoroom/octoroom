@@ -84,36 +84,22 @@ function PropertyCardSlider({ images, viewMode, city, className }: { images: str
   };
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-4 bg-white border-b border-gray-100 sticky top-0 z-40 gap-3">
-        <div>
-          <h1 className="text-xl font-black text-gray-900">卖家中心 (出售)</h1>
-          <p className="text-[11px] text-gray-500 font-medium mt-0.5">免中介费直售您的房产</p>
-        </div>
-        
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* 租房按钮 (跳转回租房页) */}
-          <button 
-            onClick={() => router.push('/my-rooms')} 
-            className="flex-1 sm:flex-none bg-white text-gray-900 border border-gray-200 hover:bg-gray-50 font-bold py-2 px-4 rounded-full shadow-sm flex items-center justify-center gap-1.5 text-[13px] transition-colors"
-          >
-            <svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" /></svg>
-            去招租
-          </button>
-
-          {/* 卖房按钮 (当前页的主按钮，黑色强调，点击打开弹窗) */}
-          <button 
-            onClick={() => setIsPublishModalOpen(true)} 
-            className="flex-1 sm:flex-none bg-gray-900 hover:bg-black text-white font-bold py-2 px-4 rounded-full shadow-sm flex items-center justify-center gap-1.5 text-[13px] transition-colors"
-          >
-            <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-            发布售房
-          </button>
-        </div>
+    // 👇 就是这个最外层的 div，如果没有它，下面的平级标签就会引发编译报错！
+    <div className={`relative bg-gray-100 overflow-hidden group/slider ${className}`}>
+      
+      <div ref={sliderRef} className="w-full h-full flex overflow-x-auto snap-x snap-mandatory scrollbar-hide" onScroll={handleScroll}>
+        {images.map((img, idx) => (
+          <div key={idx} className="w-full h-full flex-shrink-0 snap-center relative">
+            <img src={img} className="w-full h-full object-cover" alt={`cover-${idx}`} />
+            <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/40 to-transparent pointer-events-none"></div>
+          </div>
+        ))}
       </div>
 
       {viewMode === 'grid' && (
         <div className="absolute top-2 left-2 bg-black/40 backdrop-blur-md text-white text-[11px] px-2 py-1 rounded-full z-10 pointer-events-none max-w-[80%] truncate">{city}</div>
       )}
+      
       {viewMode === 'list' && (
         <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-md text-gray-900 font-bold text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1 shadow-sm z-10 pointer-events-none max-w-[80%] truncate">
           <span className="truncate">{city}</span>
@@ -122,14 +108,19 @@ function PropertyCardSlider({ images, viewMode, city, className }: { images: str
 
       {images.length > 1 && (
         <>
-          <button onClick={scrollPrev} className="absolute left-2 top-1/2 -translate-y-1/2 w-6 h-6 bg-white/80 hover:bg-white text-gray-800 rounded-full flex items-center justify-center opacity-0 group-hover/slider:opacity-100 transition-all duration-300 z-20 shadow-sm"><svg fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg></button>
-          <button onClick={scrollNext} className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 bg-white/80 hover:bg-white text-gray-800 rounded-full flex items-center justify-center opacity-0 group-hover/slider:opacity-100 transition-all duration-300 z-20 shadow-sm"><svg fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg></button>
+          <button onClick={scrollPrev} className="absolute left-2 top-1/2 -translate-y-1/2 w-6 h-6 bg-white/80 hover:bg-white text-gray-800 rounded-full flex items-center justify-center opacity-0 group-hover/slider:opacity-100 transition-all duration-300 z-20 shadow-sm">
+            <svg fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+          </button>
+          <button onClick={scrollNext} className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 bg-white/80 hover:bg-white text-gray-800 rounded-full flex items-center justify-center opacity-0 group-hover/slider:opacity-100 transition-all duration-300 z-20 shadow-sm">
+            <svg fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
+          </button>
           <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5 z-20 pointer-events-none">
             {images.map((_, i) => (<div key={i} className={`h-1 rounded-full transition-all duration-300 ${i === currentIndex ? 'w-2.5 bg-white' : 'w-1 bg-white/60'}`} />))}
           </div>
         </>
       )}
-    </div>
+      
+    </div> // 👈 不要忘记闭合最外层的 div
   );
 }
 
