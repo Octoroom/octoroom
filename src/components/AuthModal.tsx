@@ -193,7 +193,7 @@ export default function AuthModal() {
         </form>
       )}
 
-      {/* 🌟 6 大第三方平台登录：采用双列网格布局节省空间 */}
+      {/* 🌟 4 大第三方平台登录：完美的 2x2 双列网格布局 */}
       {!isResetPassword && (
         <div className="mt-6">
           <div className="relative flex items-center py-2 mb-2">
@@ -242,7 +242,6 @@ export default function AuthModal() {
               GitHub
             </button>
 
-          
             {/* Spotify */}
             <button 
               onClick={() => handleOAuthLogin('spotify')}
@@ -254,8 +253,6 @@ export default function AuthModal() {
               </svg>
               Spotify
             </button>
-
-           
           </div>
         </div>
       )}
