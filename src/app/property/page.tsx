@@ -166,7 +166,11 @@ export default function PropertyLobbyPage() {
           ))}
         </div>
       </div>
-
+      {/* 临时调试信息条：用来肉眼观察 React 到底拿到了多少条数据 */}
+      <div className="bg-yellow-50 text-yellow-800 text-xs px-4 py-2 font-bold flex justify-between">
+        <span>网络状态: {loading ? '⏳ 正在向 Supabase 拉取...' : '✅ 拉取完毕'}</span>
+        <span>当前 React 接收到的房源数量: {properties.length} 套</span>
+      </div>
       {/* 房产列表区 */}
       <div className="flex-1 p-4 space-y-4">
         {loading ? (
