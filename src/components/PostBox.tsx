@@ -101,6 +101,10 @@ export default function PostBox() {
   const gifRef = useRef<HTMLDivElement>(null);
   const tagRef = useRef<HTMLDivElement>(null); 
 
+  // 🌟 新增：处理 @ 提及状态
+  const [mentionState, setMentionState] = useState<{ query: string, start: number, end: number } | null>(null);
+  const [mentionUsers, setMentionUsers] = useState<any[]>([]);
+
   const { data, isLoading, mutate } = useSWR(activeTab, fetcher, { revalidateOnFocus: false, dedupingInterval: 5000 });
   const posts = data?.posts || [];
   const currentUserId = data?.currentUserId || null;
@@ -114,6 +118,47 @@ export default function PostBox() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // 🌟 新增：智能监听文本框输入，捕捉 @ 符号
+  const handleContentChange = async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setContent(val);
+
+    const cursor = e.target.selectionStart;
+    const textBeforeCursor = val.slice(0, cursor);
+    
+    // 正则：匹配光标前最后一次出现的 @ 以及它后面的字符
+    const match = textBeforeCursor.match(/@([a-zA-Z0-9_\u4e00-\u9fa5]*)$/);
+
+    if (match) {
+      const query = match[1];
+      setMentionState({ query, start: cursor - match[0].length, end: cursor });
+
+      if (query) {
+        // 根据输入字符去数据库模糊搜索用户
+        const { data } = await supabase.from('profiles').select('id, username, avatar_url').ilike('username', `%${query}%`).limit(5);
+        setMentionUsers(data || []);
+      } else {
+        // 刚输入 @，推荐前几个活跃用户
+        const { data } = await supabase.from('profiles').select('id, username, avatar_url').limit(5);
+        setMentionUsers(data || []);
+      }
+    } else {
+      setMentionState(null);
+      setMentionUsers([]);
+    }
+  };
+
+  // 🌟 新增：选择 @ 用户后，补全文本
+  const insertMention = (username: string) => {
+    if (!mentionState) return;
+    const before = content.slice(0, mentionState.start);
+    const after = content.slice(mentionState.end);
+    // 插入用户名，并自动加上一个空格方便继续输入
+    setContent(`${before}@${username} ${after}`);
+    setMentionState(null);
+    setMentionUsers([]);
+  };
 
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDraggingOver(true); };
   const handleDragLeave = () => setIsDraggingOver(false);
@@ -162,7 +207,6 @@ export default function PostBox() {
       
       // 🌟 智能路由分发 & 漏洞修补
       if (selectedTag === '#城市搭子') {
-        // 1. 先创建房间并拿到生成的 ID
         const { data: newCompanion, error: roomError } = await supabase.from('companion_rooms').insert({ 
           author_id: user.id, 
           city_name: city, 
@@ -171,24 +215,22 @@ export default function PostBox() {
           author_name: authorName, 
           author_avatar: authorAvatar,
           reply_count: 0 
-        }).select().single(); // 🔥 这里加入了 .select().single()
+        }).select().single(); 
         
         if (roomError) throw roomError;
 
-        // 2. 同步在 posts 表发一条带有 companion_room_id 的动态
         const { error: postError } = await supabase.from('posts').insert({
           content: `【城市搭子招募】\n目的地：${city}\n标题：${title}\n\n${content.trim()}`,
           author_id: user.id,
           username: authorName,
           image_urls: uploadedUrls,
-          companion_room_id: newCompanion.id // 🔥 绑定对应 ID
+          companion_room_id: newCompanion.id 
         });
         if (postError) throw postError;
 
         alert('搭子招募发布成功！请前往左侧【城市搭子】板块查看。');
 
       } else if (selectedTag === '#章鱼房间') {
-        // 1. 先创建房源并拿到生成的 ID
         const { data: newRoom, error: roomError } = await supabase.from('octo_rooms').insert({ 
           author_id: user.id, 
           city_name: city, 
@@ -197,17 +239,16 @@ export default function PostBox() {
           author_name: authorName, 
           author_avatar: authorAvatar,
           reply_count: 0 
-        }).select().single(); // 🔥 这里加入了 .select().single()
+        }).select().single(); 
         
         if (roomError) throw roomError;
 
-        // 2. 同步在 posts 表发一条带有 octo_room_id 的动态
         const { error: postError } = await supabase.from('posts').insert({
           content: `【精选房源】\n城市：${city}\n标题：${title}\n欢迎点击卡片进入房间查看详情并申请入住！\n\n${content.trim()}`,
           author_id: user.id,
           username: authorName,
           image_urls: uploadedUrls,
-          octo_room_id: newRoom.id // 🔥 绑定对应 ID
+          octo_room_id: newRoom.id 
         });
         if (postError) throw postError;
 
@@ -242,11 +283,28 @@ export default function PostBox() {
   );
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 relative">
       <div className="flex border-b border-gray-100 mb-4 sticky top-0 bg-white/80 backdrop-blur-md z-10">
         <button onClick={() => setActiveTab('for_you')} className={`flex-1 py-4 text-center font-bold transition-all relative hover:bg-gray-50 ${activeTab === 'for_you' ? 'text-black' : 'text-gray-400'}`}>发现 (For you){activeTab === 'for_you' && <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-1 bg-[#FF8C00] rounded-full"></div>}</button>
         <button onClick={() => setActiveTab('following')} className={`flex-1 py-4 text-center font-bold transition-all relative hover:bg-gray-50 ${activeTab === 'following' ? 'text-black' : 'text-gray-400'}`}>关注 (Following){activeTab === 'following' && <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-1 bg-[#FF8C00] rounded-full"></div>}</button>
       </div>
+
+      {/* 🌟 核心：@ 用户联想浮窗 */}
+      {mentionState && mentionUsers.length > 0 && (
+        <div className="absolute z-50 w-64 bg-white border border-gray-200 rounded-xl shadow-2xl overflow-hidden mt-[130px] ml-4 animate-in fade-in zoom-in-95">
+          <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500">选择要 @ 的用户</div>
+          {mentionUsers.map(user => (
+            <div 
+              key={user.id} 
+              onClick={() => insertMention(user.username)}
+              className="flex items-center gap-3 px-4 py-2.5 hover:bg-orange-50 cursor-pointer transition-colors"
+            >
+              <img src={user.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`} alt="avatar" className="w-8 h-8 rounded-full bg-gray-100 object-cover" />
+              <span className="text-sm font-bold text-gray-800">{user.username}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div 
         onDragOver={handleDragOver}
@@ -267,10 +325,11 @@ export default function PostBox() {
           </div>
         )}
 
+        {/* 🌟 修改：使用全新的 handleContentChange 拦截输入 */}
         <textarea
           value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder={quotePost ? "写下你的转发评论..." : selectedTag === '#日常动态' ? "在章鱼房间说点什么或拖拽右侧相册到这里..." : "详细描述一下你的计划、预算或对搭子的要求..."}
+          onChange={handleContentChange}
+          placeholder={quotePost ? "写下你的转发评论，输入 '@' 提及别人..." : selectedTag === '#日常动态' ? "在章鱼房间说点什么，输入 '@' 提及别人，或拖拽相册到这里..." : "详细描述一下你的计划、预算或对搭子的要求..."}
           className="w-full p-2 bg-transparent outline-none resize-none h-24 font-medium text-gray-800 placeholder-gray-400"
           maxLength={500}
         />

@@ -25,7 +25,51 @@ interface PostListProps {
   onDelete?: (id: string) => void;
 }
 
-// --- 🌟 对话框组件 ---
+// 🌟 核心引擎升级：文本解析并增加数据库反查跳转逻辑
+const renderContentWithMentions = (text: string, router: any) => {
+  if (!text) return null;
+  
+  const handleMentionClick = async (e: React.MouseEvent, username: string) => {
+    e.stopPropagation(); // 防止误触卡片跳转详情页
+    try {
+      // 实时去数据库查这个用户名对应的真实 ID
+      const { data } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', username)
+        .limit(1)
+        .maybeSingle();
+        
+      if (data && data.id) {
+        router.push(`/user/${data.id}`); // 拿到 ID 后完美跳转！
+      } else {
+        alert('该用户不存在或已改名');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // 正则分割出 @用户名 的部分
+  const parts = text.split(/(@[a-zA-Z0-9_\u4e00-\u9fa5]+)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('@')) {
+      const username = part.slice(1); // 提取掉 @ 符号后的纯名字
+      return (
+        <span 
+          key={i} 
+          className="text-blue-500 hover:text-blue-600 font-bold cursor-pointer hover:underline transition-colors"
+          onClick={(e) => handleMentionClick(e, username)}
+        >
+          {part}
+        </span>
+      );
+    }
+    return part;
+  });
+};
+
+// --- 对话框组件 ---
 const DialogModal = ({ config }: { config: any }) => {
   const [inputValue, setInputValue] = useState(config?.defaultValue || '');
 
@@ -78,12 +122,12 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [viewerData, setViewerData] = useState<{ images: string[], index: number } | null>(null);
 
-  // 🌟 主评论相关的状态
+  // 主评论相关的状态
   const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
   const [inlineCommentText, setInlineCommentText] = useState('');
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   
-  // 🌟 回复评论相关的状态
+  // 回复评论相关的状态
   const [replyingToId, setReplyingToId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [isSubmittingReply, setIsSubmittingReply] = useState(false);
@@ -92,6 +136,48 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
   const [isLoadingComments, setIsLoadingComments] = useState(false);
 
   const [dialogConfig, setDialogConfig] = useState<any>(null);
+
+  // 🌟 新增：评论区的 @ 用户联想状态
+  const [mentionState, setMentionState] = useState<{ query: string, start: number, end: number, type: 'comment' | 'reply' } | null>(null);
+  const [mentionUsers, setMentionUsers] = useState<any[]>([]);
+
+  // 🌟 监听输入框变化，触发 @ 联想
+  const handleMentionCheck = async (e: React.ChangeEvent<HTMLTextAreaElement>, val: string, type: 'comment' | 'reply') => {
+    const cursor = e.target.selectionStart;
+    const textBeforeCursor = val.slice(0, cursor);
+    const match = textBeforeCursor.match(/@([a-zA-Z0-9_\u4e00-\u9fa5]*)$/);
+
+    if (match) {
+      const query = match[1];
+      setMentionState({ query, start: cursor - match[0].length, end: cursor, type });
+      if (query) {
+        const { data } = await supabase.from('profiles').select('id, username, avatar_url').ilike('username', `%${query}%`).limit(5);
+        setMentionUsers(data || []);
+      } else {
+        const { data } = await supabase.from('profiles').select('id, username, avatar_url').limit(5);
+        setMentionUsers(data || []);
+      }
+    } else {
+      setMentionState(null);
+      setMentionUsers([]);
+    }
+  };
+
+  // 🌟 插入选中的 @ 用户名
+  const insertMention = (username: string) => {
+    if (!mentionState) return;
+    if (mentionState.type === 'comment') {
+      const before = inlineCommentText.slice(0, mentionState.start);
+      const after = inlineCommentText.slice(mentionState.end);
+      setInlineCommentText(`${before}@${username} ` + after); // 自动加个空格方便继续打字
+    } else {
+      const before = replyText.slice(0, mentionState.start);
+      const after = replyText.slice(mentionState.end);
+      setReplyText(`${before}@${username} ` + after);
+    }
+    setMentionState(null);
+    setMentionUsers([]);
+  };
 
   const asyncAlert = (title: string, message: string) => {
     return new Promise<void>((resolve) => {
@@ -145,7 +231,6 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
     }
   };
 
-  // 🌟 安全的分步拉取评论数据 (已修复关联查询问题)
   const fetchCommentsForPost = async (postId: string) => {
     setIsLoadingComments(true);
     setActiveComments([]); 
@@ -165,7 +250,6 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
 
       const userIds = Array.from(new Set(commentsData.map(c => c.user_id)));
       
-      // ✅ 这里使用你确认过的 profiles 表
       const { data: profilesData, error: profilesError } = await supabase
         .from('profiles') 
         .select('id, username, avatar_url')
@@ -205,23 +289,22 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
     
     if (type === '评论') {
       if (activeCommentPostId === post.id) {
-        // 关闭评论区时，重置所有状态
         setActiveCommentPostId(null);
         setInlineCommentText('');
         setReplyingToId(null);
         setReplyText('');
         setActiveComments([]);
+        setMentionState(null);
       } else {
-        // 打开评论区
         setActiveCommentPostId(post.id);
         setInlineCommentText('');
+        setMentionState(null);
         fetchCommentsForPost(post.id); 
       }
       return; 
     } 
     
     else if (type === '转发') {
-      // ... (保留转发逻辑)
       if (!current.repostedByMe) {
         const quoteContent = await asyncPrompt('转发动态', `转发 @${post.username || '用户'} 的动态：\n`);
         if (quoteContent === null) return;
@@ -274,7 +357,6 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
     }
   };
 
-  // 🌟 提交主帖评论
   const submitInlineComment = async (post: any) => {
     if (!inlineCommentText.trim() || !currentUserId) return;
     setIsSubmittingComment(true);
@@ -299,9 +381,10 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
         content: inlineCommentText.trim(),
         user_id: currentUserId,
         created_at: new Date().toISOString(),
-        profiles: { username: '我', avatar_url: null } // 乐观更新伪造用户信息
+        profiles: { username: '我', avatar_url: null } 
       }]);
       setInlineCommentText('');
+      setMentionState(null);
 
     } catch (err: any) {
       await asyncAlert('错误', '评论发布失败: ' + err.message);
@@ -310,7 +393,6 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
     }
   };
 
-  // 🌟 提交回复某人的评论
   const submitInlineReply = async (post: any, targetComment: any) => {
     if (!replyText.trim() || !currentUserId) return;
     setIsSubmittingReply(true);
@@ -341,9 +423,9 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
         profiles: { username: '我', avatar_url: null }
       }]);
 
-      // 收起回复框并清空
       setReplyingToId(null);
       setReplyText('');
+      setMentionState(null);
 
     } catch (err: any) {
       await asyncAlert('错误', '回复失败: ' + err.message);
@@ -455,8 +537,10 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                         <span>精选短租</span>
                       </div>
                     )}
+                    
+                    {/* 🌟 渲染主贴内容，@部分自动高亮 */}
                     <p className="text-gray-800 leading-relaxed whitespace-pre-wrap mb-2">
-                      {post.content}
+                      {renderContentWithMentions(post.content, router)}
                     </p>
                     
                     {post.image_urls && post.image_urls.length > 0 && (
@@ -503,7 +587,9 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                             )}
                             <div className="p-3 flex-1 min-w-0 flex flex-col justify-center">
                               <span className="text-xs font-bold text-gray-900 mb-1">@{quoteData.username}</span>
-                              <p className="text-xs text-gray-500 line-clamp-2">{quoteData.content || '分享了内容'}</p>
+                              <p className="text-xs text-gray-500 line-clamp-2">
+                                {renderContentWithMentions(quoteData.content || '分享了内容', router)}
+                              </p>
                             </div>
                           </div>
                         </div>
@@ -559,13 +645,11 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                     </button>
                   </div>
 
-                  {/* 🌟 核心：原位展开的评论列表与输入框 */}
                   {activeCommentPostId === post.id && (
                     <div 
                       className="mt-4 pt-4 border-t border-gray-100 animate-in fade-in slide-in-from-top-2 duration-200" 
                       onClick={(e) => e.stopPropagation()} 
                     >
-                      {/* 历史评论展示区 */}
                       <div className="mb-4 space-y-3 max-h-60 overflow-y-auto pr-2 scrollbar-thin">
                         {isLoadingComments ? (
                           <div className="flex justify-center py-4">
@@ -597,16 +681,17 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                                     <div className="flex items-center justify-between mb-1">
                                       <span className="font-bold text-gray-900">{commenterName}</span>
                                       
-                                      {/* 🌟 悬浮回复按钮 */}
                                       <div className="flex items-center gap-2 opacity-100 sm:opacity-0 group-hover/comment:opacity-100 transition-opacity">
                                         <button
                                           onClick={() => {
                                             if (replyingToId === comment.id) {
                                               setReplyingToId(null);
                                               setReplyText('');
+                                              setMentionState(null);
                                             } else {
                                               setReplyingToId(comment.id);
                                               setReplyText('');
+                                              setMentionState(null);
                                             }
                                           }}
                                           className="text-[11px] font-bold text-gray-500 hover:text-[#FF8C00] transition-colors"
@@ -622,28 +707,45 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                                           <span className="text-[#FF8C00] font-medium mr-1">
                                             {comment.content.split('：')[0]}：
                                           </span>
-                                          {comment.content.split('：').slice(1).join('：')}
+                                          {renderContentWithMentions(comment.content.split('：').slice(1).join('：'), router)}
                                         </>
                                       ) : (
-                                        comment.content
+                                        renderContentWithMentions(comment.content, router)
                                       )}
                                     </div>
                                   </div>
 
-                                  {/* 🌟 展开的内联回复输入框 */}
+                                  {/* 🌟 展开的内联回复输入框 + @联想 */}
                                   {replyingToId === comment.id && (
-                                    <div className="mt-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                                    <div className="mt-2 animate-in fade-in slide-in-from-top-1 duration-200 relative">
+                                      
+                                      {/* 针对回复框的 @ 浮窗 */}
+                                      {mentionState?.type === 'reply' && mentionUsers.length > 0 && (
+                                        <div className="absolute bottom-full left-0 mb-1 z-50 w-64 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95">
+                                          <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500">选择要 @ 的用户</div>
+                                          {mentionUsers.map(user => (
+                                            <div key={user.id} onClick={() => insertMention(user.username)} className="flex items-center gap-3 px-4 py-2.5 hover:bg-orange-50 cursor-pointer transition-colors">
+                                              <img src={user.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`} alt="avatar" className="w-8 h-8 rounded-full bg-gray-100 object-cover" />
+                                              <span className="text-sm font-bold text-gray-800">{user.username}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+
                                       <textarea
                                         autoFocus
                                         value={replyText}
-                                        onChange={(e) => setReplyText(e.target.value)}
-                                        placeholder={`回复 @${commenterName}...`}
+                                        onChange={(e) => { 
+                                          setReplyText(e.target.value); 
+                                          handleMentionCheck(e, e.target.value, 'reply'); 
+                                        }}
+                                        placeholder={`回复 @${commenterName}... (输入 @ 提及别人)`}
                                         className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-[13px] text-gray-900 outline-none focus:bg-white focus:ring-2 focus:ring-[#FF8C00]/20 focus:border-[#FF8C00]/50 transition-all resize-none"
                                         rows={2}
                                       />
                                       <div className="flex justify-end mt-1.5 gap-2">
                                         <button 
-                                          onClick={() => { setReplyingToId(null); setReplyText(''); }}
+                                          onClick={() => { setReplyingToId(null); setReplyText(''); setMentionState(null); }}
                                           className="px-3 py-1 rounded-full text-[12px] font-bold text-gray-500 hover:bg-gray-100 transition-colors"
                                         >
                                           取消
@@ -665,12 +767,28 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                         )}
                       </div>
 
-                      {/* 底部的主评论输入框区 */}
-                      <div className="pt-2 border-t border-gray-100/60">
+                      <div className="pt-2 border-t border-gray-100/60 relative">
+                        
+                        {/* 🌟 针对主评论框的 @ 浮窗 */}
+                        {mentionState?.type === 'comment' && mentionUsers.length > 0 && (
+                          <div className="absolute bottom-full left-0 mb-1 z-50 w-64 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95">
+                            <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500">选择要 @ 的用户</div>
+                            {mentionUsers.map(user => (
+                              <div key={user.id} onClick={() => insertMention(user.username)} className="flex items-center gap-3 px-4 py-2.5 hover:bg-orange-50 cursor-pointer transition-colors">
+                                <img src={user.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`} alt="avatar" className="w-8 h-8 rounded-full bg-gray-100 object-cover" />
+                                <span className="text-sm font-bold text-gray-800">{user.username}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
                         <textarea
                           value={inlineCommentText}
-                          onChange={(e) => setInlineCommentText(e.target.value)}
-                          placeholder={`给 @${post.username || '主帖作者'} 留个言...`}
+                          onChange={(e) => { 
+                            setInlineCommentText(e.target.value); 
+                            handleMentionCheck(e, e.target.value, 'comment'); 
+                          }}
+                          placeholder={`给 @${post.username || '主帖作者'} 留个言... (输入 @ 提及别人)`}
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-[14px] text-gray-900 outline-none focus:bg-white focus:ring-2 focus:ring-[#FF8C00]/20 focus:border-[#FF8C00]/50 transition-all resize-none"
                           rows={2}
                         />
@@ -681,6 +799,7 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                               setInlineCommentText(''); 
                               setReplyingToId(null);
                               setReplyText('');
+                              setMentionState(null);
                             }}
                             className="px-4 py-1.5 rounded-full text-[13px] font-bold text-gray-500 hover:bg-gray-100 transition-colors"
                           >
