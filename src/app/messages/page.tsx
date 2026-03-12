@@ -23,6 +23,7 @@ interface Message {
   created_at: string;
   conversation_id: string;
   is_read?: boolean;
+  image_url?: string; // 新增：图片URL字段
 }
 
 // 1. 将原来的默认导出改为普通函数（内部组件）
@@ -37,6 +38,10 @@ function MessagesContent() {
   const [activeConvo, setActiveConvo] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMsg, setInputMsg] = useState('');
+  
+  // 新增：图片上传相关状态
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -88,7 +93,7 @@ function MessagesContent() {
         
         if (!isMounted) return;
 
-        // 🌟 核心：企业级 Map 智能聚合去重 (消灭列表里的重复头像)
+        // 🌟 核心：企业级 Map 智能聚合去重
         const uniqueMap = new Map<string, Conversation>();
         enrichedConvos.forEach(c => {
           if (uniqueMap.has(c.partner_id)) {
@@ -112,7 +117,7 @@ function MessagesContent() {
         if (chatWithId && chatWithId !== user.id) {
           const existingConvo = finalConvos.find(c => c.partner_id === chatWithId);
           if (existingConvo) {
-            handleSelectConvo(existingConvo); 
+            handleSelectConvo(existingConvo, user.id); // 修复：传入 user.id 解决初始加载红点不消的问题
           } else {
             const { data: partnerProfile } = await supabase.from('profiles').select('username, avatar_url').eq('id', chatWithId).single();
             const tempConvo: Conversation = {
@@ -125,7 +130,7 @@ function MessagesContent() {
           }
         } else if (finalConvos.length > 0 && !chatWithId) {
           const firstConvo = finalConvos[0];
-          handleSelectConvo(firstConvo); 
+          handleSelectConvo(firstConvo, user.id); // 修复：传入 user.id
         }
         
         setConversations(finalConvos);
@@ -137,7 +142,7 @@ function MessagesContent() {
     return () => { isMounted = false; };
   }, [chatWithId]);
 
-  // 2. 拉取消息 (支持从多个幽灵会话中汇总聊天记录)
+  // 2. 拉取消息
   useEffect(() => {
     async function fetchMessages() {
       if (!activeConvo || activeConvo.id === 'temp_new') {
@@ -154,11 +159,13 @@ function MessagesContent() {
     fetchMessages();
   }, [activeConvo]);
 
-  // 🌟 3. 核心扫荡机制：0 延迟消灭红点
-  const handleSelectConvo = (convo: Conversation) => {
+  // 🌟 3. 核心扫荡机制：0 延迟消灭红点 (已修复初始闭包问题)
+  const handleSelectConvo = (convo: Conversation, overrideUserId?: string) => {
     setActiveConvo(convo);
+    
+    const activeUserId = overrideUserId || currentUserId;
 
-    if (convo.unread_count > 0 && currentUserId) {
+    if (convo.unread_count > 0 && activeUserId) {
       const countToClear = convo.unread_count;
 
       // 1. 本地状态秒清 (列表红点瞬间消失)
@@ -169,7 +176,7 @@ function MessagesContent() {
       // 2. 发送带参数的广播，侧边栏立刻扣除红点数字
       window.dispatchEvent(new CustomEvent('local_messages_read', { detail: { readCount: countToClear } }));
 
-      // 3. 后台静默处理数据库 (有了上面添加的 SQL 权限，就不会被拦截了)
+      // 3. 后台静默处理数据库
       supabase.from('messages')
         .update({ is_read: true })
         .in('conversation_id', convo.all_convo_ids)
@@ -225,7 +232,7 @@ function MessagesContent() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // 5. 发送消息
+  // 5. 发送文本消息
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMsg.trim() || !activeConvo || !currentUserId) return;
@@ -262,6 +269,67 @@ function MessagesContent() {
       await supabase.from('conversations').update({ last_message: contentToSend, updated_at: new Date().toISOString() }).eq('id', finalConvoId);
 
     } catch (err) { alert("消息发送失败"); }
+  };
+
+  // 6. 发送图片消息
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeConvo || !currentUserId) return;
+
+    // 清空 input，允许连续上传同一张图片
+    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    setIsUploading(true);
+    try {
+      // 1. 上传图片到 Supabase Storage
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${uuidv4()}.${fileExt}`;
+      const filePath = `${currentUserId}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('chat-images')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // 2. 获取图片的公开 URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('chat-images')
+        .getPublicUrl(filePath);
+
+      // 3. 处理会话 ID (复用文本发送的 temp_new 逻辑)
+      let finalConvoId = activeConvo.id;
+      if (finalConvoId === 'temp_new') {
+        const sortedIds = [currentUserId, activeConvo.partner_id].sort();
+        const { data: existingDbConvo } = await supabase.from('conversations').select('id').eq('user1_id', sortedIds[0]).eq('user2_id', sortedIds[1]).single();
+
+        if (existingDbConvo) {
+           finalConvoId = existingDbConvo.id;
+        } else {
+           const { data: newConvoData } = await supabase.from('conversations').insert([{ user1_id: sortedIds[0], user2_id: sortedIds[1], last_message: '[图片]' }]).select().single();
+           if(newConvoData) finalConvoId = newConvoData.id;
+        }
+        setActiveConvo(prev => prev ? { ...prev, id: finalConvoId, all_convo_ids: [...prev.all_convo_ids, finalConvoId] } : null);
+        setConversations(prev => prev.map(c => c.partner_id === activeConvo.partner_id ? { ...c, id: finalConvoId, all_convo_ids: [...c.all_convo_ids, finalConvoId] } : c));
+      }
+
+      // 4. 更新本地 UI
+      const tempMessage: Message = { id: uuidv4(), sender_id: currentUserId, content: '[图片]', created_at: new Date().toISOString(), conversation_id: finalConvoId, image_url: publicUrl };
+      setMessages(prev => [...prev, tempMessage]);
+      setConversations(prev => prev.map(c => 
+        c.partner_id === activeConvo.partner_id ? { ...c, last_message: '[图片]', updated_at: new Date().toISOString() } : c
+      ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()));
+
+      // 5. 写入数据库
+      await supabase.from('messages').insert([{ conversation_id: finalConvoId, sender_id: currentUserId, content: '[图片]', image_url: publicUrl }]);
+      await supabase.from('conversations').update({ last_message: '[图片]', updated_at: new Date().toISOString() }).eq('id', finalConvoId);
+
+    } catch (err) {
+      console.error(err);
+      alert("图片上传失败，请稍后重试");
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleGoToProfile = (partnerId: string) => { router.push(`/profile/${partnerId}`); };
@@ -357,9 +425,22 @@ function MessagesContent() {
                           onClick={() => handleGoToProfile(activeConvo.partner_id)}
                         />
                       )}
+                      
+                      {/* 修改：消息渲染支持图片展示 */}
                       <div className={`max-w-[70%] px-4 py-2.5 rounded-[18px] text-[14.5px] leading-relaxed shadow-sm ${isMe ? 'bg-gray-900 text-white rounded-br-sm' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-sm'}`}>
-                        {msg.content}
+                        {msg.image_url ? (
+                          <img 
+                            src={msg.image_url} 
+                            alt="chat-image" 
+                            className="max-w-full rounded-lg cursor-zoom-in" 
+                            style={{ maxHeight: '200px', objectFit: 'contain' }}
+                            onClick={() => window.open(msg.image_url, '_blank')} 
+                          />
+                        ) : (
+                          msg.content
+                        )}
                       </div>
+
                     </div>
                   );
                 })
@@ -368,9 +449,33 @@ function MessagesContent() {
             </div>
 
             <div className="p-4 bg-white border-t border-gray-100 shrink-0">
-              <form onSubmit={handleSendMessage} className="flex gap-2">
+              {/* 修改：增加图片上传按钮和相关逻辑 */}
+              <form onSubmit={handleSendMessage} className="flex gap-2 items-center">
+                
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  ref={fileInputRef} 
+                  onChange={handleImageUpload} 
+                  className="hidden" 
+                />
+                
+                <button 
+                  type="button" 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-orange-500 transition-colors shrink-0 disabled:opacity-50"
+                >
+                  {isUploading ? (
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-orange-500"></div>
+                  ) : (
+                    <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" /></svg>
+                  )}
+                </button>
+
                 <input type="text" placeholder="说点什么..." value={inputMsg} onChange={(e) => setInputMsg(e.target.value)} className="flex-1 bg-gray-50 border border-gray-200 rounded-full px-5 py-3 text-[14px] outline-none focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition-all" />
-                <button type="submit" disabled={!inputMsg.trim()} className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center text-white shadow-md hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0">
+                
+                <button type="submit" disabled={!inputMsg.trim() || isUploading} className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center text-white shadow-md hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0">
                   <svg fill="currentColor" viewBox="0 0 24 24" className="w-5 h-5 ml-1"><path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" /></svg>
                 </button>
               </form>

@@ -358,13 +358,50 @@ export default function RoomDetailPage() {
     } catch (err: any) { alert("修改失败: " + err.message); } finally { setIsUpdating(false); }
   };
 
+  // 🌟 终极防线：详情页带【实时数据库查验】的删除函数
   const handleDelete = async () => {
-    if (!window.confirm("确定要永久删除这个房源吗？删除后不可恢复！")) return;
     try {
-      const { error } = await supabase.from('octo_rooms').delete().eq('id', room.id);
+      // 1. 🛑 强制实时查询：这个房源到底有没有在 octo_bookings 表里产生过订单？
+      const { data: relatedOrders, error: checkError } = await supabase
+        .from('octo_bookings')
+        .select('id, status')
+        .eq('room_id', room.id);
+
+      if (checkError) throw checkError;
+
+      // 2. 🛑 如果查到了真实的订单记录，坚决拦截！
+      if (relatedOrders && relatedOrders.length > 0) {
+        const hasActive = relatedOrders.some(o => ['pending', 'approved', 'paid'].includes(o.status));
+        if (hasActive) {
+          alert("⚠️ 拦截：该房源当前有【待处理】或【进行中】的订单申请！请先前往「收到的订单」页进行处理。");
+        } else {
+          alert("⚠️ 拦截：该房源已有历史交易订单。为保障账单与聊天数据的完整性，系统禁止删除已产生交互的房源！\n(建议修改房源状态为下架，而不是删除)");
+        }
+        return; // 拦截成功，退出函数
+      }
+
+      // 3. 确认干干净净，二次弹窗让用户确认
+      if (!window.confirm("安全检查通过 ✅\n这个房源目前没有任何订单关联。\n\n确定要永久删除它吗？数据不可恢复。")) return;
+
+      // 4. 真实向 Supabase 发送删除指令，并要求返回被删结果 (.select)
+      const { data, error } = await supabase
+        .from('octo_rooms')
+        .delete()
+        .eq('id', room.id)
+        .select();
+
       if (error) throw error;
-      alert("房源已成功删除！"); router.push('/my-rooms');
-    } catch (err: any) { alert("删除失败: " + err.message); }
+      
+      if (!data || data.length === 0) {
+         throw new Error("数据库无响应，可能是 RLS 权限拦截了删除操作。");
+      }
+
+      alert("房源已成功彻底删除！");
+      router.push('/my-rooms');
+      
+    } catch (err: any) {
+      alert("❌ 删除失败: " + err.message);
+    }
   };
 
   const renderCalendar = () => {

@@ -22,6 +22,10 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
   const [isLoadingCities, setIsLoadingCities] = useState(true);
   
   const [unreadMsgCount, setUnreadMsgCount] = useState(0);
+  
+  // 🌟 修改：分为房东未读(收到的订单) 和 房客未读(发出的预定)
+  const [hostUnreadCount, setHostUnreadCount] = useState(0);
+  const [guestUnreadCount, setGuestUnreadCount] = useState(0);
 
   useEffect(() => {
     async function fetchPopularCities() {
@@ -52,6 +56,7 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
   useEffect(() => {
     let isMounted = true;
     
+    // 1. 查未读私信
     const fetchUnreadCount = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -67,29 +72,70 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
       }
     };
 
+    // 🌟 2. 查房东未读的订单 (host_id 是自己，且 host_unread 是 true)
+    const fetchHostUnread = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { count, error } = await supabase
+        .from('octo_bookings')
+        .select('*', { count: 'exact', head: true })
+        .eq('host_id', user.id)
+        .eq('host_unread', true);
+
+      if (!error && count !== null && isMounted) {
+        setHostUnreadCount(count);
+      }
+    };
+
+    // 🌟 3. 查房客未读的订单 (guest_id 是自己，且 guest_unread 是 true)
+    const fetchGuestUnread = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { count, error } = await supabase
+        .from('octo_bookings')
+        .select('*', { count: 'exact', head: true })
+        .eq('guest_id', user.id)
+        .eq('guest_unread', true);
+
+      if (!error && count !== null && isMounted) {
+        setGuestUnreadCount(count);
+      }
+    };
+
     if (isSignedIn) {
       fetchUnreadCount();
+      fetchHostUnread();
+      fetchGuestUnread();
 
       const channel = supabase.channel('global_unread_badge')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
+        // 监听私信表变动
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
           fetchUnreadCount();
         })
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, () => {
-          fetchUnreadCount(); 
+        // 🌟 监听订单表变动，同时刷新双方的红点
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'octo_bookings' }, () => {
+          fetchHostUnread();
+          fetchGuestUnread();
         })
         .subscribe();
 
-      const handleLocalRead = (e: any) => {
-        const countToClear = e.detail?.readCount || 0;
-        setUnreadMsgCount(prev => Math.max(0, prev - countToClear));
-      };
+      // 接收各个页面发出的消灭红点广播
+      const handleLocalRead = (e: any) => setUnreadMsgCount(prev => Math.max(0, prev - (e.detail?.readCount || 0)));
+      const handleHostOrdersRead = (e: any) => setHostUnreadCount(prev => Math.max(0, prev - (e.detail?.count || 0)));
+      const handleGuestOrdersRead = (e: any) => setGuestUnreadCount(prev => Math.max(0, prev - (e.detail?.count || 0)));
       
       window.addEventListener('local_messages_read', handleLocalRead);
+      window.addEventListener('local_host_orders_read', handleHostOrdersRead);
+      window.addEventListener('local_guest_orders_read', handleGuestOrdersRead);
 
       return () => {
         isMounted = false;
         supabase.removeChannel(channel);
         window.removeEventListener('local_messages_read', handleLocalRead);
+        window.removeEventListener('local_host_orders_read', handleHostOrdersRead);
+        window.removeEventListener('local_guest_orders_read', handleGuestOrdersRead);
       };
     }
   }, [isSignedIn]);
@@ -188,7 +234,6 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
               <span>服务大厅</span>
             </Link>
 
-            {/* 🌟 新增：服务商专属的工作台/任务面板 */}
             <Link href="/provider-workspace" onClick={onMenuClick} className="flex items-center space-x-4 px-4 py-2.5 rounded-full hover:bg-gray-200/50 transition-all text-[16px] font-medium text-gray-900 w-fit pr-6">
               <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75v-.008z" />
@@ -201,11 +246,19 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
               <span>我的相册</span>
             </Link>
 
-            <Link href="/my-rooms" onClick={onMenuClick} className="flex items-center space-x-4 px-4 py-2.5 rounded-full hover:bg-gray-200/50 transition-all text-[16px] font-medium text-gray-900 w-fit pr-6">
-              <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
-              </svg>
-              <span>我的房源</span>
+            {/* 🌟 房东的红点：我的房源 */}
+            <Link href="/my-rooms" onClick={onMenuClick} className="flex items-center space-x-4 px-4 py-2.5 rounded-full hover:bg-gray-200/50 transition-all text-[16px] font-medium text-gray-900 w-fit pr-6 group relative">
+              <div className="relative">
+                <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+                </svg>
+                {hostUnreadCount > 0 && (
+                  <div className="absolute -top-1.5 -right-2 bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center border-2 border-white shadow-sm flex items-center justify-center">
+                    {hostUnreadCount > 99 ? '99+' : hostUnreadCount}
+                  </div>
+                )}
+              </div>
+              <span className={hostUnreadCount > 0 ? 'font-bold text-gray-900' : ''}>我的房源</span>
             </Link>
 
             <Link href="/my-comments" onClick={onMenuClick} className="flex items-center space-x-4 px-4 py-2.5 rounded-full hover:bg-gray-200/50 transition-all text-[16px] font-medium text-gray-900 w-fit pr-6">
@@ -222,11 +275,19 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
               <span>我的收藏</span>
             </Link>
 
-            <Link href="/my-bookings" onClick={onMenuClick} className="flex items-center space-x-4 px-4 py-2.5 rounded-full hover:bg-gray-200/50 transition-all text-[16px] font-medium text-gray-900 w-fit pr-6">
-              <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-              </svg>
-              <span>我的预定</span>
+            {/* 🌟 房客的红点：我的预定 */}
+            <Link href="/my-bookings" onClick={onMenuClick} className="flex items-center space-x-4 px-4 py-2.5 rounded-full hover:bg-gray-200/50 transition-all text-[16px] font-medium text-gray-900 w-fit pr-6 group relative">
+              <div className="relative">
+                <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                </svg>
+                {guestUnreadCount > 0 && (
+                  <div className="absolute -top-1.5 -right-2 bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center border-2 border-white shadow-sm flex items-center justify-center">
+                    {guestUnreadCount > 99 ? '99+' : guestUnreadCount}
+                  </div>
+                )}
+              </div>
+              <span className={guestUnreadCount > 0 ? 'font-bold text-gray-900' : ''}>我的预定</span>
             </Link>
 
             <Link href="/messages" onClick={onMenuClick} className="flex items-center space-x-4 px-4 py-2.5 rounded-full hover:bg-gray-200/50 transition-all text-[16px] font-medium text-gray-900 w-fit pr-6 group relative">

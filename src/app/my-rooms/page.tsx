@@ -48,7 +48,6 @@ const getDisplayImages = (room: any) => {
   return [roomImages[idx1], roomImages[idx2], roomImages[idx3]];
 };
 
-// 🌟 企业级高级质感文案引擎
 const buildAwesomePostContent = (title: string, city: string, addressName: string, roomType: string, rentMode: string, price: string, amenities: string[], description: string) => {
   const facilityMap: Record<string, string> = {
     wifi: '高速网络', ac: '冷暖空调', kitchen: '全套厨房',
@@ -151,7 +150,6 @@ export default function MyRoomsPage() {
   const [customAmenities, setCustomAmenities] = useState<{id: string, label: string}[]>([]);
   const [newAmenity, setNewAmenity] = useState('');
 
-  // 🌟 加入了 syncToPost 状态
   const [formData, setFormData] = useState({
     city: '', title: '', availableDate: '', priceAmount: '', priceCurrency: 'NZD',
     roomType: '独立单间', amenities: [] as string[], description: '', rentMode: 'entire', totalRooms: 1,
@@ -159,7 +157,7 @@ export default function MyRoomsPage() {
     imageMode: 'system' as 'system' | 'custom',
     coverImageFiles: [] as File[],        
     coverImagePreviews: [] as string[],
-    syncToPost: true // 👈 默认勾选同步到日常动态
+    syncToPost: true
   });
 
   const baseFacilityOptions = [
@@ -167,6 +165,9 @@ export default function MyRoomsPage() {
     { id: 'kitchen', label: '全套厨房' }, { id: 'washer', label: '洗衣机' },
     { id: 'bathroom', label: '独立卫浴' }, { id: 'workspace', label: '专属工作区' }
   ];
+
+  // 🌟 动态计算出未读的订单数量
+  const unreadOrdersCount = orders.filter(o => o.host_unread).length;
 
   const fetchData = async () => {
     setLoading(true);
@@ -187,6 +188,66 @@ export default function MyRoomsPage() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  // 🌟 核心：当用户切换到“订单”Tab，且存在未读订单时，秒清红点
+  useEffect(() => {
+    if (activeTab === 'orders' && unreadOrdersCount > 0) {
+      // 1. 广播给侧边栏，瞬间擦除数字
+      window.dispatchEvent(new CustomEvent('local_host_orders_read', { detail: { count: unreadOrdersCount } }));
+      
+      // 2. 本地状态抹平
+      setOrders(prev => prev.map(o => o.host_unread ? { ...o, host_unread: false } : o));
+
+      // 3. 后台静默将数据库更新为已读
+      const unreadIds = orders.filter(o => o.host_unread).map(o => o.id);
+      if (unreadIds.length > 0) {
+        supabase.from('octo_bookings').update({ host_unread: false }).in('id', unreadIds).then();
+      }
+    }
+  }, [activeTab, unreadOrdersCount]);
+
+  const handleDeleteRoom = async (e: React.MouseEvent, roomId: string) => {
+    e.stopPropagation(); 
+    
+    try {
+      const { data: relatedOrders, error: checkError } = await supabase
+        .from('octo_bookings')
+        .select('id, status')
+        .eq('room_id', roomId);
+
+      if (checkError) throw checkError;
+
+      if (relatedOrders && relatedOrders.length > 0) {
+        const hasActive = relatedOrders.some(o => ['pending', 'approved', 'paid'].includes(o.status));
+        if (hasActive) {
+          alert("⚠️ 拦截：该房源当前有【待处理】或【进行中】的订单申请！请先前往「收到的订单」页进行处理。");
+        } else {
+          alert("⚠️ 拦截：该房源已有历史交易订单。为保障账单与聊天数据的完整性，系统禁止删除已产生交互的房源！\n(建议修改房源状态为下架，而不是删除)");
+        }
+        return; 
+      }
+
+      if (!window.confirm("安全检查通过 ✅\n这个房源目前没有任何订单关联。\n\n确定要永久删除它吗？数据不可恢复。")) return;
+
+      setRooms(prev => prev.filter(r => r.id !== roomId));
+
+      const { data, error } = await supabase
+        .from('octo_rooms')
+        .delete()
+        .eq('id', roomId)
+        .select();
+
+      if (error) throw error;
+      
+      if (!data || data.length === 0) {
+         throw new Error("数据库无响应，可能是 RLS 权限拦截了删除操作。");
+      }
+      
+    } catch (error: any) {
+      alert("❌ 操作失败: " + error.message);
+      fetchData();
+    }
+  };
 
   useEffect(() => {
     if (isPublishModalOpen && mapContainerRef.current && !mapInstanceRef.current) {
@@ -296,7 +357,6 @@ export default function MyRoomsPage() {
     });
   };
 
-  // 🌟 同步发布的核心逻辑
   const handlePublish = async () => {
     if (!formData.title.trim() || !formData.city.trim() || !formData.priceAmount.trim()) { alert("请填写房源城市、标题和价格！"); return; }
     if (formData.imageMode === 'custom' && formData.coverImageFiles.length === 0) { alert("请至少上传一张房源图片！"); return; }
@@ -334,7 +394,6 @@ export default function MyRoomsPage() {
 
       if (insertError) throw insertError;
 
-      // 🌟 根据用户的勾选，决定是否同步发布到日常动态，加入详细报错拦截
       if (formData.syncToPost) {
         const postImage = finalImageUrls.length > 0 ? finalImageUrls[0] : `https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=500&q=80&random=${newRoom?.id}`;
         
@@ -342,7 +401,7 @@ export default function MyRoomsPage() {
 
         const { error: postError } = await supabase.from('posts').insert([{
           author_id: user.id, 
-          octo_room_id: newRoom.id, // 租房模块是有这个字段的，可以直接关联
+          octo_room_id: newRoom.id, 
           content: postContent,
           image_urls: [postImage],
         }]);
@@ -354,7 +413,6 @@ export default function MyRoomsPage() {
       }
 
       setIsPublishModalOpen(false); 
-      // 🌟 重置表单时保留 syncToPost: true
       setFormData({ city: '', title: '', availableDate: '', priceAmount: '', priceCurrency: 'NZD', roomType: '独立单间', amenities: [], description: '', rentMode: 'entire', totalRooms: 1, addressName: '', lat: 0, lng: 0, imageMode: 'system', coverImageFiles: [], coverImagePreviews: [], syncToPost: true });
       fetchData();                 
     } catch (error: any) { alert("操作提示: " + error.message); } finally { setIsPublishing(false); }
@@ -362,7 +420,10 @@ export default function MyRoomsPage() {
 
   const handleApproval = async (bookingId: string, newStatus: 'approved' | 'rejected') => {
     try {
-      const { error } = await supabase.from('octo_bookings').update({ status: newStatus }).eq('id', bookingId);
+      // 🌟 修改状态的同时，让房客的界面亮起红点 (guest_unread: true)
+      const { error } = await supabase.from('octo_bookings')
+        .update({ status: newStatus, guest_unread: true })
+        .eq('id', bookingId);
       if (error) throw error;
       setOrders(prev => prev.map(order => order.id === bookingId ? { ...order, status: newStatus } : order));
     } catch (err: any) { alert('操作失败: ' + err.message); }
@@ -380,7 +441,10 @@ export default function MyRoomsPage() {
     setReplyTexts(prev => ({ ...prev, [bookingId]: '' }));
 
     try {
-      const { error } = await supabase.from('octo_bookings').update({ chat_history: updatedHistory }).eq('id', bookingId);
+      // 🌟 回复消息的同时，让房客的界面亮起红点 (guest_unread: true)
+      const { error } = await supabase.from('octo_bookings')
+        .update({ chat_history: updatedHistory, guest_unread: true })
+        .eq('id', bookingId);
       if (error) throw error;
     } catch (err: any) { alert("发送失败: " + err.message); }
   };
@@ -479,7 +543,6 @@ export default function MyRoomsPage() {
         </div>
         
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* 卖房按钮 (黑白高冷质感，跳转到卖房专属页) */}
           <button 
             onClick={() => router.push('/my-properties')} 
             className="flex-1 sm:flex-none bg-white text-gray-900 border border-gray-200 hover:bg-gray-50 font-bold py-2 px-4 rounded-full shadow-sm flex items-center justify-center gap-1.5 text-[13px] transition-colors"
@@ -488,7 +551,6 @@ export default function MyRoomsPage() {
             去卖房
           </button>
 
-          {/* 租房按钮 (当前页的主按钮，蓝色强调，点击打开弹窗) */}
           <button 
             onClick={() => setIsPublishModalOpen(true)} 
             className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-full shadow-sm flex items-center justify-center gap-1.5 text-[13px] transition-colors"
@@ -500,8 +562,19 @@ export default function MyRoomsPage() {
       </div>
 
       <div className="flex w-full bg-white border-b border-gray-100 sticky top-[69px] z-30">
-        <button onClick={() => setActiveTab('rooms')} className={`flex-1 py-3 text-[14px] relative transition-colors ${activeTab === 'rooms' ? 'font-bold text-blue-600' : 'font-medium text-gray-500'}`}>我发布的房源</button>
-        <button onClick={() => setActiveTab('orders')} className={`flex-1 py-3 text-[14px] relative transition-colors ${activeTab === 'orders' ? 'font-bold text-blue-600' : 'font-medium text-gray-500'}`}>收到的订单</button>
+        <button onClick={() => setActiveTab('rooms')} className={`flex-1 py-3 text-[14px] relative transition-colors ${activeTab === 'rooms' ? 'font-bold text-blue-600' : 'font-medium text-gray-500'}`}>
+          我发布的房源
+        </button>
+        
+        {/* 🌟 修改：根据 unreadOrdersCount 渲染红点 */}
+        <button onClick={() => setActiveTab('orders')} className={`flex-1 py-3 text-[14px] relative transition-colors flex items-center justify-center gap-1.5 ${activeTab === 'orders' ? 'font-bold text-blue-600' : 'font-medium text-gray-500'}`}>
+          收到的订单
+          {unreadOrdersCount > 0 && (
+            <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none flex items-center justify-center min-w-[18px] h-[18px] shadow-sm">
+              {unreadOrdersCount > 99 ? '99+' : unreadOrdersCount}
+            </span>
+          )}
+        </button>
         <div className="absolute bottom-0 h-[3px] bg-blue-600 rounded-full transition-all duration-300 w-16" style={{ left: activeTab === 'rooms' ? '25%' : '75%', transform: 'translateX(-50%)' }}></div>
       </div>
 
@@ -527,7 +600,20 @@ export default function MyRoomsPage() {
 
               <div className={viewMode === 'grid' ? "columns-2 gap-3 space-y-3" : "flex flex-col gap-4"}>
                 {rooms.map((room) => (
-                  <div key={room.id} className={`bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-md border border-gray-100 transition-all ${viewMode === 'list' ? 'flex flex-col sm:flex-row p-3 gap-4 items-stretch' : 'flex flex-col'}`}>
+                  <div key={room.id} className={`relative bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-md border border-gray-100 transition-all ${viewMode === 'list' ? 'flex flex-col sm:flex-row p-3 gap-4 items-stretch' : 'flex flex-col'}`}>
+                    
+                    <div className="absolute top-2 right-2 z-30 flex flex-col gap-2">
+                       <button 
+                         onClick={(e) => handleDeleteRoom(e, room.id)}
+                         className="w-7 h-7 bg-white/70 backdrop-blur-md rounded-full flex items-center justify-center hover:bg-red-50 hover:text-red-600 shadow-sm transition-all text-gray-600"
+                         title="永久删除房源"
+                       >
+                         <svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                           <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                         </svg>
+                       </button>
+                    </div>
+
                     <div onClick={() => router.push(`/rooms/${room.id}`)} className={`cursor-pointer flex flex-col ${viewMode === 'list' ? "w-full sm:w-56 flex-shrink-0" : "w-full"}`}>
                       <RoomCardSlider 
                         images={getDisplayImages(room)} 
@@ -567,7 +653,7 @@ export default function MyRoomsPage() {
                   {order.status === 'paid' && <div className="absolute top-5 right-5 z-10 text-xs font-bold text-green-600 bg-green-50 border border-green-100 px-2.5 py-1 rounded-md">已付款确认</div>}
                   {order.status === 'rejected' && <div className="absolute top-5 right-5 z-10 text-xs font-bold text-red-500 bg-red-50 border border-red-100 px-2.5 py-1 rounded-md">已拒绝</div>}
                   {order.status === 'approved' && <div className="absolute top-5 right-5 z-10 text-xs font-bold text-orange-500 bg-orange-50 border border-orange-100 px-2.5 py-1 rounded-md">等待付款</div>}
-                  {order.status === 'pending' && <div className="absolute top-5 right-5 z-10 text-xs font-bold text-blue-500 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-md">待审核</div>}
+                  {order.status === 'pending' && <div className="absolute top-5 right-5 z-10 text-xs font-bold text-blue-500 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-md shadow-sm animate-pulse">待审核处理</div>}
                   {order.status === 'cancelled' && <div className="absolute top-5 right-5 z-10 text-xs font-bold text-gray-500 bg-gray-50 border border-gray-200 px-2.5 py-1 rounded-md">房客已取消</div>}
 
                   <div className="flex gap-4 border-b border-gray-100 pb-4 mb-4 mt-1">
