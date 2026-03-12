@@ -138,6 +138,21 @@ export default function PropertyTradeRoom() {
   const [activeTab, setActiveTab] = useState<'DETAILS' | 'WORKFLOW' | 'PROVIDERS'>('DETAILS');
   const [currentImgIndex, setCurrentImgIndex] = useState(0);
 
+  // 👇 新增：点赞和收藏状态
+  const [isLiked, setIsLiked] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  
+  // 👇 新增：处理点击事件的函数 (目前是前端 UI 切换，后续你可以补充 Supabase 的写入逻辑)
+  const handleToggleLike = () => {
+    setIsLiked(!isLiked);
+    // TODO: await supabase.from('likes').insert(...) 
+  };
+
+  const handleToggleSave = () => {
+    setIsSaved(!isSaved);
+    // TODO: await supabase.from('saved_properties').insert(...)
+  };
+
   // 🌟 从 Supabase 获取真实数据 (修复了作用域错误)
   useEffect(() => {
     const fetchProperty = async () => {
@@ -478,15 +493,39 @@ const renderProvidersRoom = () => {
       
       {/* 顶部标题栏 */}
       <div className="bg-white pt-6 pb-4 px-5 border-b border-gray-100 sticky top-0 z-30">
-        <button onClick={() => router.back()} className="mb-4 w-8 h-8 flex items-center justify-center bg-gray-50 rounded-full text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors"><svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg></button>
+        <button onClick={() => router.back()} className="mb-4 w-8 h-8 flex items-center justify-center bg-gray-50 rounded-full text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors">
+          <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+        </button>
         <div className="flex justify-between items-start gap-4">
           <div className="flex flex-col justify-center">
             <h1 className="text-[20px] font-black text-gray-900 leading-tight mb-1 line-clamp-2">{property.title}</h1>
             <p className="text-[16px] font-black text-orange-500 mt-1">{property.price}</p>
           </div>
-          <button className="shrink-0 p-2 bg-gray-50 rounded-full text-gray-400 hover:text-red-500 transition-colors">
-            <svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" /></svg>
-          </button>
+          
+          {/* 👇 替换这里：新增的收藏与点赞按钮组 */}
+          <div className="flex items-center gap-2">
+            {/* 收藏按钮 (Bookmark) */}
+            <button 
+              onClick={handleToggleSave}
+              className={`shrink-0 p-2 rounded-full transition-colors ${isSaved ? 'bg-orange-50 text-orange-500' : 'bg-gray-50 text-gray-400 hover:text-orange-500 hover:bg-orange-50'}`}
+            >
+              <svg fill={isSaved ? "currentColor" : "none"} viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+              </svg>
+            </button>
+
+            {/* 点赞按钮 (Heart) */}
+            <button 
+              onClick={handleToggleLike}
+              className={`shrink-0 p-2 rounded-full transition-colors ${isLiked ? 'bg-red-50 text-red-500' : 'bg-gray-50 text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
+            >
+              <svg fill={isLiked ? "currentColor" : "none"} viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
+              </svg>
+            </button>
+          </div>
+          {/* 👆 替换结束 */}
+
         </div>
       </div>
 

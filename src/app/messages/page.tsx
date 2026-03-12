@@ -5,7 +5,8 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
 // 🌟 引入 Emoji 选择器
-import EmojiPicker from 'emoji-picker-react';
+// 修改后
+import EmojiPicker, { Theme } from 'emoji-picker-react';
 
 interface Conversation {
   id: string;
@@ -494,7 +495,7 @@ function MessagesContent() {
                   </button>
                   {showEmojiPicker && (
                     <div ref={emojiRef} onClick={(e) => e.stopPropagation()} className="absolute bottom-14 left-0 md:-left-24 z-50 shadow-2xl rounded-2xl overflow-hidden border border-gray-100">
-                      <EmojiPicker onEmojiClick={(e) => setInputMsg(prev => prev + e.emoji)} theme="light" />
+                      <EmojiPicker onEmojiClick={(e) => setInputMsg(prev => prev + e.emoji)} theme={Theme.LIGHT} />
                     </div>
                   )}
                 </div>
