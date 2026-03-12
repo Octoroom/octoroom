@@ -6,8 +6,42 @@ import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import PostList from '@/components/PostList'; 
+import Cropper from 'react-easy-crop'; // 🌟 引入裁剪库
 
 type TabType = 'posts' | 'replies';
+
+// 🌟 新增：将 Canvas 转换为 File 的辅助函数 (用于生成最终的裁剪图片)
+const createImage = (url: string): Promise<HTMLImageElement> =>
+  new Promise((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener('load', () => resolve(image));
+    image.addEventListener('error', (error) => reject(error));
+    image.setAttribute('crossOrigin', 'anonymous');
+    image.src = url;
+  });
+
+async function getCroppedImg(imageSrc: string, pixelCrop: any, fileName: string): Promise<File | null> {
+  try {
+    const image = await createImage(imageSrc);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    canvas.width = pixelCrop.width;
+    canvas.height = pixelCrop.height;
+    ctx.drawImage(image, pixelCrop.x, pixelCrop.y, pixelCrop.width, pixelCrop.height, 0, 0, pixelCrop.width, pixelCrop.height);
+
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (!blob) return reject(new Error('Canvas is empty'));
+        resolve(new File([blob], fileName, { type: 'image/jpeg' }));
+      }, 'image/jpeg', 0.9);
+    });
+  } catch (e) {
+    console.error(e);
+    return null;
+  }
+}
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -26,7 +60,6 @@ export default function ProfilePage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
-  // 🌟 新增：profession 职业认证字段
   const [editForm, setEditForm] = useState({ 
     username: '', bio: '', location: '', website: '', avatar_url: '', banner_url: '', profession: '' 
   });
@@ -38,6 +71,13 @@ export default function ProfilePage() {
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
+
+  // 🌟 新增：裁剪器相关状态
+  const [cropType, setCropType] = useState<'avatar' | 'banner' | null>(null);
+  const [cropImageSrc, setCropImageSrc] = useState('');
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
 
   useEffect(() => {
     fetchProfileAndStats();
@@ -138,19 +178,49 @@ export default function ProfilePage() {
       username: profile?.username || '', bio: profile?.bio || '',
       location: profile?.location || '', website: profile?.website || '',
       avatar_url: profile?.avatar_url || '', banner_url: profile?.banner_url || '',
-      profession: profile?.profession || '' // 🌟 初始化职业数据
+      profession: profile?.profession || ''
     });
     setAvatarPreview(profile?.avatar_url || '');
     setBannerPreview(profile?.banner_url || '/profile-banner.jpg');
     setIsEditModalOpen(true);
   };
 
+  // 🌟 修改：选择图片后不再直接预览，而是打开全屏裁剪器
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>, type: 'avatar' | 'banner') => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const previewUrl = URL.createObjectURL(file);
-    if (type === 'avatar') { setAvatarFile(file); setAvatarPreview(previewUrl); } 
-    else { setBannerFile(file); setBannerPreview(previewUrl); }
+    
+    const url = URL.createObjectURL(file);
+    setCropImageSrc(url);
+    setCropType(type);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    
+    // 清空 input，允许重复选择同一张图
+    e.target.value = '';
+  };
+
+  // 🌟 新增：用户在裁剪器点击“确定”
+  const handleCropConfirm = async () => {
+    if (!croppedAreaPixels) return;
+    try {
+      // 通过辅助函数，将裁剪框里的内容变成一个新的 File 对象
+      const croppedFile = await getCroppedImg(cropImageSrc, croppedAreaPixels, `${cropType}_cropped.jpg`);
+      if (!croppedFile) return;
+      
+      const previewUrl = URL.createObjectURL(croppedFile);
+      if (cropType === 'avatar') {
+        setAvatarFile(croppedFile);
+        setAvatarPreview(previewUrl);
+      } else {
+        setBannerFile(croppedFile);
+        setBannerPreview(previewUrl);
+      }
+    } catch (e) {
+      console.error(e);
+      alert("裁剪失败，请重试");
+    }
+    setCropType(null); // 关闭裁剪器
   };
 
   const handleSaveProfile = async () => {
@@ -180,10 +250,10 @@ export default function ProfilePage() {
         bio: editForm.bio,
         location: editForm.location,
         website: editForm.website,
-        profession: editForm.profession, // 🌟 提交保存职业数据
+        profession: editForm.profession,
         avatar_url: finalAvatarUrl,
         banner_url: finalBannerUrl,
-        updated_at: new Date().toISOString(),
+        // 🌟 修复：已删除 updated_at 字段，解决保存失败报错问题
       };
 
       const { error: updateError } = await supabase.from('profiles').update(updates).eq('id', user.id);
@@ -272,7 +342,6 @@ export default function ProfilePage() {
               <h2 className="text-[20px] sm:text-[22px] font-black text-gray-900 leading-tight">
                 {displayName}
               </h2>
-              {/* 🌟 职业认证徽章 (展示在名字旁边) */}
               {profile?.profession && (
                 <span className="flex items-center gap-1 bg-orange-50 text-orange-600 px-2 py-0.5 rounded-md text-[11px] font-bold border border-orange-100/50 relative top-[1px]">
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 00.75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 00-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0112 15.75c-2.648 0-5.195-.429-7.527-1.22a2.016 2.016 0 01-.673-.38m0 0A2.18 2.18 0 013 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.894m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
@@ -385,7 +454,7 @@ export default function ProfilePage() {
         )}
       </div>
 
-      {/* 🌟 核心功能：推特级资料编辑弹窗 */}
+      {/* 🌟 修改：编辑弹窗区大幅优化 */}
       {isEditModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm sm:p-4">
           <div className="bg-white sm:rounded-2xl w-full h-full sm:h-auto sm:max-h-[90vh] max-w-xl flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
@@ -404,23 +473,23 @@ export default function ProfilePage() {
 
             <div className="flex-1 overflow-y-auto pb-10">
               {/* 背景图编辑区 */}
-              <div className="relative w-full h-40 bg-gray-200 group cursor-pointer" onClick={() => bannerInputRef.current?.click()}>
+              <div className="relative w-full h-40 sm:h-48 bg-gray-200 group cursor-pointer" onClick={() => bannerInputRef.current?.click()}>
                 <img src={bannerPreview || '/profile-banner.jpg'} alt="banner" className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <div className="w-10 h-10 bg-black/50 rounded-full flex items-center justify-center backdrop-blur-sm"><svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="white" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" /><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" /></svg></div>
+                <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="w-10 h-10 bg-black/50 rounded-full flex items-center justify-center backdrop-blur-sm shadow-sm"><svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="white" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" /><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" /></svg></div>
                 </div>
                 <input type="file" ref={bannerInputRef} hidden accept="image/*" onChange={(e) => handleImageSelect(e, 'banner')} />
               </div>
 
               {/* 头像编辑区 */}
-              <div className="relative w-24 h-24 sm:w-28 sm:h-28 -mt-14 ml-4 rounded-full border-4 border-white bg-white group cursor-pointer shadow-sm z-10" onClick={() => avatarInputRef.current?.click()}>
+              <div className="relative w-28 h-28 sm:w-32 sm:h-32 -mt-16 ml-4 rounded-full border-[5px] border-white bg-white group cursor-pointer shadow-sm z-10" onClick={() => avatarInputRef.current?.click()}>
                 {avatarPreview ? (
                    <img src={avatarPreview} alt="avatar" className="w-full h-full object-cover rounded-full" />
                 ) : (
-                   <div className="w-full h-full flex items-center justify-center bg-gray-100 rounded-full text-3xl font-black text-gray-400">U</div>
+                   <div className="w-full h-full flex items-center justify-center bg-gray-100 rounded-full text-4xl font-black text-gray-400">U</div>
                 )}
-                <div className="absolute inset-0 bg-black/30 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                   <div className="w-10 h-10 bg-black/50 rounded-full flex items-center justify-center backdrop-blur-sm"><svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="white" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" /><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" /></svg></div>
+                <div className="absolute inset-0 bg-black/30 rounded-full flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                   <div className="w-10 h-10 bg-black/50 rounded-full flex items-center justify-center backdrop-blur-sm shadow-sm"><svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="white" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" /><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" /></svg></div>
                 </div>
                 <input type="file" ref={avatarInputRef} hidden accept="image/*" onChange={(e) => handleImageSelect(e, 'avatar')} />
               </div>
@@ -432,7 +501,6 @@ export default function ProfilePage() {
                   <input type="text" value={editForm.username} onChange={(e) => setEditForm({...editForm, username: e.target.value})} className="w-full px-3 py-3 text-[15px] text-gray-900 outline-none bg-transparent" placeholder="填写你的昵称" maxLength={50} />
                 </div>
 
-                {/* 🌟 职业认证输入框 */}
                 <div className="group relative rounded-md border border-gray-300 focus-within:border-[#FF8C00] focus-within:ring-1 focus-within:ring-[#FF8C00] transition-all">
                   <label className="absolute -top-2 left-2 bg-white px-1 text-[11px] font-medium text-gray-500 group-focus-within:text-[#FF8C00]">职业 / 身份</label>
                   <input type="text" value={editForm.profession} onChange={(e) => setEditForm({...editForm, profession: e.target.value})} className="w-full px-3 py-3 text-[15px] text-gray-900 outline-none bg-transparent" placeholder="例如：高级架构师、独立设计师..." maxLength={30} />
@@ -457,6 +525,41 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
+
+      {/* 🌟 核心功能：全屏裁剪器覆盖层 */}
+      {cropType && (
+        <div className="fixed inset-0 z-[100] bg-black flex flex-col">
+          <div className="flex items-center justify-between p-4 bg-black/90 text-white z-10 shrink-0">
+            <button onClick={() => setCropType(null)} className="px-4 py-2 text-sm font-bold">取消</button>
+            <span className="text-base font-bold">移动和缩放</span>
+            <button onClick={handleCropConfirm} className="px-4 py-1.5 bg-white text-black rounded-full text-sm font-bold">确定</button>
+          </div>
+          
+          <div className="relative flex-1 bg-black">
+            <Cropper
+              image={cropImageSrc}
+              crop={crop}
+              zoom={zoom}
+              aspect={cropType === 'avatar' ? 1 : 3} // 头像 1:1，背景图 3:1
+              cropShape={cropType === 'avatar' ? 'round' : 'rect'}
+              onCropChange={setCrop}
+              onZoomChange={setZoom}
+              onCropComplete={(croppedArea, croppedAreaPixels) => setCroppedAreaPixels(croppedAreaPixels as any)}
+            />
+          </div>
+          
+          <div className="p-8 bg-black/90 shrink-0 flex items-center justify-center gap-4">
+            <span className="text-white">−</span>
+            <input 
+              type="range" min={1} max={3} step={0.1} value={zoom} 
+              onChange={e => setZoom(Number(e.target.value))} 
+              className="w-full max-w-xs accent-white" 
+            />
+            <span className="text-white">+</span>
+          </div>
+        </div>
+      )}
+
     </main>
   );
 }
