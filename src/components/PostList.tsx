@@ -25,7 +25,7 @@ interface PostListProps {
   onDelete?: (id: string) => void;
 }
 
-// --- 🌟 对话框组件 (仅用于“转发”等需要强弹窗的场景) ---
+// --- 🌟 对话框组件 ---
 const DialogModal = ({ config }: { config: any }) => {
   const [inputValue, setInputValue] = useState(config?.defaultValue || '');
 
@@ -78,10 +78,18 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [viewerData, setViewerData] = useState<{ images: string[], index: number } | null>(null);
 
-  // 🌟 新增：控制“下拉式评论框”的状态
+  // 🌟 主评论相关的状态
   const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
   const [inlineCommentText, setInlineCommentText] = useState('');
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+  
+  // 🌟 回复评论相关的状态
+  const [replyingToId, setReplyingToId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [isSubmittingReply, setIsSubmittingReply] = useState(false);
+
+  const [activeComments, setActiveComments] = useState<any[]>([]);
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
 
   const [dialogConfig, setDialogConfig] = useState<any>(null);
 
@@ -137,6 +145,49 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
     }
   };
 
+  // 🌟 安全的分步拉取评论数据 (已修复关联查询问题)
+  const fetchCommentsForPost = async (postId: string) => {
+    setIsLoadingComments(true);
+    setActiveComments([]); 
+    try {
+      const { data: commentsData, error: commentsError } = await supabase
+        .from('comments')
+        .select('*') 
+        .eq('post_id', postId)
+        .order('created_at', { ascending: true }); 
+
+      if (commentsError) throw commentsError;
+      
+      if (!commentsData || commentsData.length === 0) {
+        setActiveComments([]);
+        return;
+      }
+
+      const userIds = Array.from(new Set(commentsData.map(c => c.user_id)));
+      
+      // ✅ 这里使用你确认过的 profiles 表
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles') 
+        .select('id, username, avatar_url')
+        .in('id', userIds);
+        
+      if (profilesError) console.error("获取评论者信息失败:", profilesError);
+
+      const profileMap = new Map(profilesData?.map((p: any) => [p.id, p]) || []);
+      const mergedComments = commentsData.map(c => ({
+        ...c,
+        profiles: profileMap.get(c.user_id) || null
+      }));
+
+      setActiveComments(mergedComments);
+
+    } catch (err) {
+      console.error("加载评论失败:", err);
+    } finally {
+      setIsLoadingComments(false);
+    }
+  };
+
   const handleInteraction = async (type: string, post: any) => {
     if (!currentUserId) { 
       const goToLogin = await asyncConfirm('需要登录', '操作前请先登录，是否现在前往登录页面？');
@@ -152,19 +203,25 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
     let updates = { ...current };
     let table = '';
     
-    // 🌟 修改：评论改为触发下拉输入框
     if (type === '评论') {
       if (activeCommentPostId === post.id) {
+        // 关闭评论区时，重置所有状态
         setActiveCommentPostId(null);
         setInlineCommentText('');
+        setReplyingToId(null);
+        setReplyText('');
+        setActiveComments([]);
       } else {
+        // 打开评论区
         setActiveCommentPostId(post.id);
         setInlineCommentText('');
+        fetchCommentsForPost(post.id); 
       }
       return; 
     } 
     
     else if (type === '转发') {
+      // ... (保留转发逻辑)
       if (!current.repostedByMe) {
         const quoteContent = await asyncPrompt('转发动态', `转发 @${post.username || '用户'} 的动态：\n`);
         if (quoteContent === null) return;
@@ -217,36 +274,81 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
     }
   };
 
-  // 🌟 新增：处理下拉框的评论提交
+  // 🌟 提交主帖评论
   const submitInlineComment = async (post: any) => {
     if (!inlineCommentText.trim() || !currentUserId) return;
     setIsSubmittingComment(true);
     try {
-      const { error } = await supabase.from('comments').insert({
+      const { data: newCommentData, error } = await supabase.from('comments').insert({
         post_id: post.id,
         user_id: currentUserId,
         content: inlineCommentText.trim()
-      });
+      }).select().single(); 
+
       if (error) throw error;
       
-      const current = interactions[post.id] || post._interactions || {
-        likes: 0, comments: 0, marks: 0, reposts: 0,
-        likedByMe: false, markedByMe: false, repostedByMe: false, isFollowingAuthor: false
-      };
-      
-      // 更新本地评论数
+      const current = interactions[post.id] || post._interactions || { comments: 0 };
       setInteractions(prev => ({
         ...prev,
         [post.id]: { ...current, comments: current.comments + 1 }
       }));
       
-      // 关掉输入框并清空
-      setActiveCommentPostId(null);
+      setActiveComments(prev => [...prev, {
+        ...(newCommentData || {}),
+        id: newCommentData?.id || 'temp-' + Date.now(),
+        content: inlineCommentText.trim(),
+        user_id: currentUserId,
+        created_at: new Date().toISOString(),
+        profiles: { username: '我', avatar_url: null } // 乐观更新伪造用户信息
+      }]);
       setInlineCommentText('');
+
     } catch (err: any) {
       await asyncAlert('错误', '评论发布失败: ' + err.message);
     } finally {
       setIsSubmittingComment(false);
+    }
+  };
+
+  // 🌟 提交回复某人的评论
+  const submitInlineReply = async (post: any, targetComment: any) => {
+    if (!replyText.trim() || !currentUserId) return;
+    setIsSubmittingReply(true);
+    try {
+      const targetName = targetComment.profiles?.username || '未知用户';
+      const finalContent = `回复 @${targetName}：${replyText.trim()}`;
+
+      const { data: newCommentData, error } = await supabase.from('comments').insert({
+        post_id: post.id,
+        user_id: currentUserId,
+        content: finalContent
+      }).select().single(); 
+
+      if (error) throw error;
+      
+      const current = interactions[post.id] || post._interactions || { comments: 0 };
+      setInteractions(prev => ({
+        ...prev,
+        [post.id]: { ...current, comments: current.comments + 1 }
+      }));
+      
+      setActiveComments(prev => [...prev, {
+        ...(newCommentData || {}),
+        id: newCommentData?.id || 'temp-' + Date.now(),
+        content: finalContent,
+        user_id: currentUserId,
+        created_at: new Date().toISOString(),
+        profiles: { username: '我', avatar_url: null }
+      }]);
+
+      // 收起回复框并清空
+      setReplyingToId(null);
+      setReplyText('');
+
+    } catch (err: any) {
+      await asyncAlert('错误', '回复失败: ' + err.message);
+    } finally {
+      setIsSubmittingReply(false);
     }
   };
 
@@ -457,34 +559,141 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                     </button>
                   </div>
 
-                  {/* 🌟 核心：原位下拉式评论框 */}
+                  {/* 🌟 核心：原位展开的评论列表与输入框 */}
                   {activeCommentPostId === post.id && (
                     <div 
-                      className="mt-2 pt-3 border-t border-gray-100 animate-in fade-in slide-in-from-top-2 duration-200" 
-                      onClick={(e) => e.stopPropagation()} // 防止点击输入框触发跳转
+                      className="mt-4 pt-4 border-t border-gray-100 animate-in fade-in slide-in-from-top-2 duration-200" 
+                      onClick={(e) => e.stopPropagation()} 
                     >
-                      <textarea
-                        autoFocus
-                        value={inlineCommentText}
-                        onChange={(e) => setInlineCommentText(e.target.value)}
-                        placeholder={`回复 @${post.username || '用户'}...`}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-[14px] text-gray-900 outline-none focus:bg-white focus:ring-2 focus:ring-[#FF8C00]/20 focus:border-[#FF8C00]/50 transition-all resize-none"
-                        rows={2}
-                      />
-                      <div className="flex justify-end mt-2 gap-2">
-                        <button 
-                          onClick={() => { setActiveCommentPostId(null); setInlineCommentText(''); }}
-                          className="px-4 py-1.5 rounded-full text-[13px] font-bold text-gray-500 hover:bg-gray-100 transition-colors"
-                        >
-                          取消
-                        </button>
-                        <button 
-                          onClick={() => submitInlineComment(post)}
-                          disabled={!inlineCommentText.trim() || isSubmittingComment}
-                          className="px-5 py-1.5 rounded-full text-[13px] font-bold text-white bg-[#FF8C00] hover:bg-[#e07b00] disabled:opacity-50 transition-colors shadow-sm flex items-center justify-center min-w-[64px]"
-                        >
-                          {isSubmittingComment ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : '回复'}
-                        </button>
+                      {/* 历史评论展示区 */}
+                      <div className="mb-4 space-y-3 max-h-60 overflow-y-auto pr-2 scrollbar-thin">
+                        {isLoadingComments ? (
+                          <div className="flex justify-center py-4">
+                            <div className="w-5 h-5 border-2 border-[#FF8C00] border-t-transparent rounded-full animate-spin"></div>
+                          </div>
+                        ) : activeComments.length === 0 ? (
+                          <div className="text-center text-[13px] text-gray-400 py-3 bg-gray-50 rounded-xl">
+                            还没有人评论，快来抢沙发吧！
+                          </div>
+                        ) : (
+                          activeComments.map(comment => {
+                            const commenterName = comment.profiles?.username || '匿名用户';
+                            const commenterInitial = commenterName.charAt(0).toUpperCase();
+
+                            return (
+                              <div key={comment.id} className="flex gap-2.5 items-start group/comment">
+                                {/* 头像 */}
+                                <div className="w-7 h-7 shrink-0 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-500 overflow-hidden mt-0.5">
+                                  {comment.profiles?.avatar_url ? (
+                                    <img src={comment.profiles.avatar_url} className="w-full h-full object-cover" alt="avatar" />
+                                  ) : (
+                                    commenterInitial
+                                  )}
+                                </div>
+                                
+                                <div className="flex-1 min-w-0">
+                                  {/* 评论内容气泡 */}
+                                  <div className="bg-gray-50 rounded-2xl rounded-tl-none px-3.5 py-2.5 text-[13px] text-gray-800 relative">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="font-bold text-gray-900">{commenterName}</span>
+                                      
+                                      {/* 🌟 悬浮回复按钮 */}
+                                      <div className="flex items-center gap-2 opacity-100 sm:opacity-0 group-hover/comment:opacity-100 transition-opacity">
+                                        <button
+                                          onClick={() => {
+                                            if (replyingToId === comment.id) {
+                                              setReplyingToId(null);
+                                              setReplyText('');
+                                            } else {
+                                              setReplyingToId(comment.id);
+                                              setReplyText('');
+                                            }
+                                          }}
+                                          className="text-[11px] font-bold text-gray-500 hover:text-[#FF8C00] transition-colors"
+                                        >
+                                          回复
+                                        </button>
+                                      </div>
+                                    </div>
+                                    
+                                    <div className="whitespace-pre-wrap leading-relaxed break-words">
+                                      {comment.content.startsWith('回复 @') ? (
+                                        <>
+                                          <span className="text-[#FF8C00] font-medium mr-1">
+                                            {comment.content.split('：')[0]}：
+                                          </span>
+                                          {comment.content.split('：').slice(1).join('：')}
+                                        </>
+                                      ) : (
+                                        comment.content
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* 🌟 展开的内联回复输入框 */}
+                                  {replyingToId === comment.id && (
+                                    <div className="mt-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                                      <textarea
+                                        autoFocus
+                                        value={replyText}
+                                        onChange={(e) => setReplyText(e.target.value)}
+                                        placeholder={`回复 @${commenterName}...`}
+                                        className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-[13px] text-gray-900 outline-none focus:bg-white focus:ring-2 focus:ring-[#FF8C00]/20 focus:border-[#FF8C00]/50 transition-all resize-none"
+                                        rows={2}
+                                      />
+                                      <div className="flex justify-end mt-1.5 gap-2">
+                                        <button 
+                                          onClick={() => { setReplyingToId(null); setReplyText(''); }}
+                                          className="px-3 py-1 rounded-full text-[12px] font-bold text-gray-500 hover:bg-gray-100 transition-colors"
+                                        >
+                                          取消
+                                        </button>
+                                        <button 
+                                          onClick={() => submitInlineReply(post, comment)}
+                                          disabled={!replyText.trim() || isSubmittingReply}
+                                          className="px-3 py-1 rounded-full text-[12px] font-bold text-white bg-[#FF8C00] hover:bg-[#e07b00] disabled:opacity-50 transition-colors shadow-sm min-w-[50px]"
+                                        >
+                                          {isSubmittingReply ? '发送...' : '发送'}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      {/* 底部的主评论输入框区 */}
+                      <div className="pt-2 border-t border-gray-100/60">
+                        <textarea
+                          value={inlineCommentText}
+                          onChange={(e) => setInlineCommentText(e.target.value)}
+                          placeholder={`给 @${post.username || '主帖作者'} 留个言...`}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-[14px] text-gray-900 outline-none focus:bg-white focus:ring-2 focus:ring-[#FF8C00]/20 focus:border-[#FF8C00]/50 transition-all resize-none"
+                          rows={2}
+                        />
+                        <div className="flex justify-end mt-2 gap-2">
+                          <button 
+                            onClick={() => { 
+                              setActiveCommentPostId(null); 
+                              setInlineCommentText(''); 
+                              setReplyingToId(null);
+                              setReplyText('');
+                            }}
+                            className="px-4 py-1.5 rounded-full text-[13px] font-bold text-gray-500 hover:bg-gray-100 transition-colors"
+                          >
+                            收起面板
+                          </button>
+                          <button 
+                            onClick={() => submitInlineComment(post)}
+                            disabled={!inlineCommentText.trim() || isSubmittingComment}
+                            className="px-5 py-1.5 rounded-full text-[13px] font-bold text-white bg-[#FF8C00] hover:bg-[#e07b00] disabled:opacity-50 transition-colors shadow-sm flex items-center justify-center min-w-[64px]"
+                          >
+                            {isSubmittingComment ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : '发评论'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
