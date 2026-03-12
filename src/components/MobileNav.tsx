@@ -30,8 +30,15 @@ export default function MobileNav() {
 
   return (
     <div className="md:hidden">
-      {/* 移动端顶部 Navbar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-100 sticky top-0 z-30">
+      
+      {/* 🌟 核心修复 1：新增一个占位符。
+          因为下面的导航栏变成了 fixed 脱离文档流，如果不加占位符，页面的顶部内容会被导航栏挡住。
+          高度计算：py-3 (24px) + 图标 (24px) + 边框 (1px) = 49px 左右 
+      */}
+      <div className="h-[49px] w-full bg-transparent shrink-0" />
+
+      {/* 🌟 核心修复 2：将 sticky 改为 fixed，并加入 iOS 风格的毛玻璃模糊效果 */}
+      <div className="fixed top-0 left-0 right-0 flex items-center justify-between px-4 py-3 bg-white/90 backdrop-blur-md border-b border-gray-100 z-40 shadow-sm transition-all">
         
         {/* 左侧汉堡菜单按钮 */}
         <button 
@@ -44,9 +51,9 @@ export default function MobileNav() {
         </button>
 
         {/* 居中标题 */}
-        <span className="font-bold text-gray-900 text-lg">章鱼房间</span>
+        <span className="font-bold text-gray-900 text-lg tracking-wide">章鱼房间</span>
         
-        {/* 🌟 右侧：替换了原来的占位符，放入消息铃铛，并设置负边距保持与左侧对称 */}
+        {/* 右侧：消息铃铛 */}
         <div className="flex items-center justify-end -mr-2">
           <NotificationBell />
         </div>
@@ -55,7 +62,7 @@ export default function MobileNav() {
       {/* 移动端毛玻璃遮罩层 */}
       {isOpen && (
         <div 
-          className="fixed inset-0 z-40 bg-gray-900/40 backdrop-blur-sm transition-opacity"
+          className="fixed inset-0 z-40 bg-gray-900/50 backdrop-blur-sm transition-opacity"
           onClick={() => setIsOpen(false)}
         />
       )}
