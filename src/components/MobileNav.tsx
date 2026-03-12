@@ -4,6 +4,8 @@
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
+// 🌟 引入新写的消息铃铛组件
+import NotificationBell from '@/components/NotificationBell';
 
 export default function MobileNav() {
   const [isOpen, setIsOpen] = useState(false);
@@ -30,6 +32,8 @@ export default function MobileNav() {
     <div className="md:hidden">
       {/* 移动端顶部 Navbar */}
       <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-100 sticky top-0 z-30">
+        
+        {/* 左侧汉堡菜单按钮 */}
         <button 
           onClick={() => setIsOpen(true)}
           className="p-2 -ml-2 text-gray-600 hover:text-[#FF8C00] rounded-lg hover:bg-orange-50 transition-colors focus:outline-none focus:ring-2 focus:ring-[#FF8C00]/50"
@@ -39,10 +43,13 @@ export default function MobileNav() {
           </svg>
         </button>
 
+        {/* 居中标题 */}
         <span className="font-bold text-gray-900 text-lg">章鱼房间</span>
         
-        {/* 右侧占位，保持标题绝对居中 */}
-        <div className="w-8"></div>
+        {/* 🌟 右侧：替换了原来的占位符，放入消息铃铛，并设置负边距保持与左侧对称 */}
+        <div className="flex items-center justify-end -mr-2">
+          <NotificationBell />
+        </div>
       </div>
 
       {/* 移动端毛玻璃遮罩层 */}
