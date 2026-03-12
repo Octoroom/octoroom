@@ -5,7 +5,6 @@ import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-// 🌟 引入新创建的图片查看器组件
 import ImageViewer from './ImageViewer'; 
 
 interface InteractionState {
@@ -26,7 +25,7 @@ interface PostListProps {
   onDelete?: (id: string) => void;
 }
 
-// --- 🌟 Jira 风格的对话框组件 (Octoroom 品牌橙色版) ---
+// --- 🌟 对话框组件 (仅用于“转发”等需要强弹窗的场景) ---
 const DialogModal = ({ config }: { config: any }) => {
   const [inputValue, setInputValue] = useState(config?.defaultValue || '');
 
@@ -46,7 +45,7 @@ const DialogModal = ({ config }: { config: any }) => {
               rows={4}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              placeholder="说点什么吧..."
+              placeholder={config.placeholder || "说点什么吧..."}
             />
           ) : (
             <p className="text-gray-600 leading-relaxed whitespace-pre-wrap">{config.message}</p>
@@ -77,11 +76,13 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
   const router = useRouter();
   const [interactions, setInteractions] = useState<Record<string, InteractionState>>({});
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
-
-  // 🌟 新增：控制全屏图片查看器的状态
   const [viewerData, setViewerData] = useState<{ images: string[], index: number } | null>(null);
 
-  // --- 🌟 对话框状态与 Promise 封装 ---
+  // 🌟 新增：控制“下拉式评论框”的状态
+  const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
+  const [inlineCommentText, setInlineCommentText] = useState('');
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+
   const [dialogConfig, setDialogConfig] = useState<any>(null);
 
   const asyncAlert = (title: string, message: string) => {
@@ -100,16 +101,15 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
     });
   };
 
-  const asyncPrompt = (title: string, defaultValue: string) => {
+  const asyncPrompt = (title: string, defaultValue: string = '', placeholder: string = '说点什么吧...') => {
     return new Promise<string | null>((resolve) => {
       setDialogConfig({
-        type: 'prompt', title, defaultValue,
+        type: 'prompt', title, defaultValue, placeholder,
         onConfirm: (val: string) => { resolve(val); setDialogConfig(null); },
         onCancel: () => { resolve(null); setDialogConfig(null); }
       });
     });
   };
-  // ----------------------------------------
 
   const handleMenuAction = async (action: string, post: any) => {
     setActiveMenuId(null);
@@ -120,9 +120,7 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
     
     if (!currentUserId) { 
       const goToLogin = await asyncConfirm('需要登录', '操作前请先登录，是否现在前往登录页面？');
-      if (goToLogin) {
-        router.push('/login');
-      }
+      if (goToLogin) router.push('/login');
       return; 
     }
     
@@ -142,25 +140,31 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
   const handleInteraction = async (type: string, post: any) => {
     if (!currentUserId) { 
       const goToLogin = await asyncConfirm('需要登录', '操作前请先登录，是否现在前往登录页面？');
-      if (goToLogin) {
-        router.push('/login');
-      }
+      if (goToLogin) router.push('/login');
       return; 
     }
 
-    const current = interactions[post.id] || post._interactions;
+    const current = interactions[post.id] || post._interactions || {
+      likes: 0, comments: 0, marks: 0, reposts: 0,
+      likedByMe: false, markedByMe: false, repostedByMe: false, isFollowingAuthor: false
+    };
+    
     let updates = { ...current };
     let table = '';
     
-    if (type === '点赞') {
-      updates.likedByMe = !current.likedByMe;
-      updates.likes = current.likedByMe ? current.likes - 1 : current.likes + 1;
-      table = 'likes';
-    } else if (type === '收藏') {
-      updates.markedByMe = !current.markedByMe;
-      updates.marks = current.markedByMe ? current.marks - 1 : current.marks + 1;
-      table = 'bookmarks';
-    } else if (type === '转发') {
+    // 🌟 修改：评论改为触发下拉输入框
+    if (type === '评论') {
+      if (activeCommentPostId === post.id) {
+        setActiveCommentPostId(null);
+        setInlineCommentText('');
+      } else {
+        setActiveCommentPostId(post.id);
+        setInlineCommentText('');
+      }
+      return; 
+    } 
+    
+    else if (type === '转发') {
       if (!current.repostedByMe) {
         const quoteContent = await asyncPrompt('转发动态', `转发 @${post.username || '用户'} 的动态：\n`);
         if (quoteContent === null) return;
@@ -189,7 +193,17 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
         updates.reposts = current.reposts - 1;
         table = 'reposts';
       }
-    }
+    } 
+    
+    else if (type === '点赞') {
+      updates.likedByMe = !current.likedByMe;
+      updates.likes = current.likedByMe ? current.likes - 1 : current.likes + 1;
+      table = 'likes';
+    } else if (type === '收藏') {
+      updates.markedByMe = !current.markedByMe;
+      updates.marks = current.markedByMe ? current.marks - 1 : current.marks + 1;
+      table = 'bookmarks';
+    } 
 
     setInteractions(prev => ({ ...prev, [post.id]: updates }));
     try {
@@ -200,6 +214,39 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
       }
     } catch (e) {
       setInteractions(prev => ({ ...prev, [post.id]: current }));
+    }
+  };
+
+  // 🌟 新增：处理下拉框的评论提交
+  const submitInlineComment = async (post: any) => {
+    if (!inlineCommentText.trim() || !currentUserId) return;
+    setIsSubmittingComment(true);
+    try {
+      const { error } = await supabase.from('comments').insert({
+        post_id: post.id,
+        user_id: currentUserId,
+        content: inlineCommentText.trim()
+      });
+      if (error) throw error;
+      
+      const current = interactions[post.id] || post._interactions || {
+        likes: 0, comments: 0, marks: 0, reposts: 0,
+        likedByMe: false, markedByMe: false, repostedByMe: false, isFollowingAuthor: false
+      };
+      
+      // 更新本地评论数
+      setInteractions(prev => ({
+        ...prev,
+        [post.id]: { ...current, comments: current.comments + 1 }
+      }));
+      
+      // 关掉输入框并清空
+      setActiveCommentPostId(null);
+      setInlineCommentText('');
+    } catch (err: any) {
+      await asyncAlert('错误', '评论发布失败: ' + err.message);
+    } finally {
+      setIsSubmittingComment(false);
     }
   };
 
@@ -231,10 +278,8 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
 
   return (
     <>
-      {/* 🌟 挂载全局对话框组件 */}
       <DialogModal config={dialogConfig} />
 
-      {/* 🌟 挂载全局图片查看器组件 */}
       {viewerData && (
         <ImageViewer 
           images={viewerData.images} 
@@ -312,7 +357,6 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                       {post.content}
                     </p>
                     
-                    {/* 🌟 修改点 1：原帖图片的点击放大支持 */}
                     {post.image_urls && post.image_urls.length > 0 && (
                       <div className={`grid gap-2 mb-3 mt-1 ${post.image_urls.length === 1 ? 'grid-cols-1 sm:w-2/3' : post.image_urls.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
                         {post.image_urls.map((url: string, idx: number) => (
@@ -321,7 +365,7 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                               src={url} 
                               alt="动态配图" 
                               onClick={(e) => {
-                                e.stopPropagation(); // 阻止跳转详情页
+                                e.stopPropagation(); 
                                 setViewerData({ images: post.image_urls, index: idx });
                               }}
                               className="w-full h-full object-cover cursor-zoom-in hover:scale-105 transition-transform duration-300" 
@@ -333,7 +377,6 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
 
                     {(() => {
                       if (!post.quote_post) return null;
-                      
                       const quoteData = Array.isArray(post.quote_post) ? post.quote_post[0] : post.quote_post;
                       if (!quoteData) return null;
                       
@@ -343,14 +386,13 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                           className="mt-3 border border-gray-200 rounded-xl overflow-hidden hover:border-[#FF8C00] transition-colors cursor-pointer bg-white group/quote shadow-sm"
                         >
                           <div className="flex flex-col sm:flex-row">
-                            {/* 🌟 修改点 2：被转发帖子内图片的点击放大支持 */}
                             {quoteData.image_urls?.[0] && (
                               <div className="w-full sm:w-28 h-28 shrink-0 bg-gray-100 overflow-hidden">
                                  <img 
                                    src={quoteData.image_urls[0]} 
                                    alt="quote" 
                                    onClick={(e) => {
-                                     e.stopPropagation(); // 阻止跳转被转发帖子详情
+                                     e.stopPropagation();
                                      setViewerData({ images: quoteData.image_urls, index: 0 });
                                    }}
                                    className="w-full h-full object-cover cursor-zoom-in group-hover/quote:scale-105 transition-transform duration-300" 
@@ -367,15 +409,16 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                     })()}
                   </div>
 
-                  <div className="flex justify-between items-center mt-4 text-gray-400">
+                  {/* 帖子底部互动按钮栏 */}
+                  <div className="flex justify-between items-center mt-4 text-gray-400 relative z-10">
                     <button 
                       onClick={(e) => { 
                         e.stopPropagation(); 
-                        handleNavigateToDetail(post); 
+                        handleInteraction('评论', post); 
                       }} 
-                      className="flex items-center space-x-1.5 hover:text-blue-500 group transition-colors"
+                      className={`flex items-center space-x-1.5 group transition-colors ${activeCommentPostId === post.id ? 'text-blue-500' : 'hover:text-blue-500'}`}
                     >
-                      <div className="p-2 rounded-full group-hover:bg-blue-50 transition-colors">
+                      <div className={`p-2 rounded-full transition-colors ${activeCommentPostId === post.id ? 'bg-blue-50' : 'group-hover:bg-blue-50'}`}>
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 sm:w-5 sm:h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.273 5.48.432.447.74 1.04.586 1.641a4.483 4.483 0 01-.923 1.785A5.969 5.969 0 006 21c1.282 0 2.47-.402 3.445-1.087.81.22 1.668.337 2.555.337z" /></svg>
                       </div>
                       <span className="text-xs font-medium">{state.comments > 0 ? state.comments : '评论'}</span>
@@ -413,6 +456,39 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                       <span className="text-xs font-medium">{state.marks > 0 ? state.marks : '收藏'}</span>
                     </button>
                   </div>
+
+                  {/* 🌟 核心：原位下拉式评论框 */}
+                  {activeCommentPostId === post.id && (
+                    <div 
+                      className="mt-2 pt-3 border-t border-gray-100 animate-in fade-in slide-in-from-top-2 duration-200" 
+                      onClick={(e) => e.stopPropagation()} // 防止点击输入框触发跳转
+                    >
+                      <textarea
+                        autoFocus
+                        value={inlineCommentText}
+                        onChange={(e) => setInlineCommentText(e.target.value)}
+                        placeholder={`回复 @${post.username || '用户'}...`}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-[14px] text-gray-900 outline-none focus:bg-white focus:ring-2 focus:ring-[#FF8C00]/20 focus:border-[#FF8C00]/50 transition-all resize-none"
+                        rows={2}
+                      />
+                      <div className="flex justify-end mt-2 gap-2">
+                        <button 
+                          onClick={() => { setActiveCommentPostId(null); setInlineCommentText(''); }}
+                          className="px-4 py-1.5 rounded-full text-[13px] font-bold text-gray-500 hover:bg-gray-100 transition-colors"
+                        >
+                          取消
+                        </button>
+                        <button 
+                          onClick={() => submitInlineComment(post)}
+                          disabled={!inlineCommentText.trim() || isSubmittingComment}
+                          className="px-5 py-1.5 rounded-full text-[13px] font-bold text-white bg-[#FF8C00] hover:bg-[#e07b00] disabled:opacity-50 transition-colors shadow-sm flex items-center justify-center min-w-[64px]"
+                        >
+                          {isSubmittingComment ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : '回复'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                 </div>
               </div>
             </div>
