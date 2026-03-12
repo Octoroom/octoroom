@@ -4,12 +4,24 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import type { User } from '@supabase/supabase-js';
+
+// 1. 定义类型，防止 Vercel 严格的 TS 检查报错
+interface Profile {
+  id: string;
+  username?: string;
+  avatar_url?: string;
+  bio?: string;
+  followersCount: number;
+  followingCount: number;
+}
 
 export default function DiscoverPage() {
   const router = useRouter();
-  const [profiles, setProfiles] = useState<any[]>([]);
+  // 2. 替换掉 any[]
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -21,29 +33,23 @@ export default function DiscoverPage() {
       const { data: { user } } = await supabase.auth.getUser();
       setCurrentUser(user);
 
-      // 1. 获取所有博主 (排除自己)
       const { data: profilesData, error: profilesError } = await supabase
-        .from('profiles') // 💡 如果你其实用的是 users 表，这里改成 'users'
+        .from('profiles')
         .select('*')
         .neq('id', user?.id || '');
 
-      // 🚨 打印报错信息！看看 Supabase 到底拦截了什么
       if (profilesError) {
-        console.error("🚨 获取博主列表失败，数据库报错:", profilesError.message);
-      } else {
-        console.log("✅ 成功拿到博主数据，数量:", profilesData?.length);
+        console.error("🚨 获取博主列表失败:", profilesError.message);
       }
 
-      // 2. 获取所有的关注关系
       const { data: allFollows, error: followsError } = await supabase
         .from('follows')
         .select('follower_id, following_id');
 
       if (followsError) {
-         console.error("🚨 获取关注列表失败，可能是 follows 表没开权限:", followsError.message);
+         console.error("🚨 获取关注列表失败:", followsError.message);
       }
 
-      // 3. 计算每个人的数据
       const statsMap: Record<string, { followers: number; following: number }> = {};
       profilesData?.forEach(p => {
         statsMap[p.id] = { followers: 0, following: 0 };
@@ -57,9 +63,9 @@ export default function DiscoverPage() {
         if (statsMap[f.follower_id]) statsMap[f.follower_id].following++;
       });
 
-      // 4. 组装最终数据
       if (profilesData) {
-        const enrichedProfiles = profilesData.map(p => ({
+        // 确保映射后的数据符合 Profile 接口
+        const enrichedProfiles: Profile[] = profilesData.map((p) => ({
           ...p,
           followersCount: statsMap[p.id]?.followers || 0,
           followingCount: statsMap[p.id]?.following || 0
@@ -79,13 +85,12 @@ export default function DiscoverPage() {
   };
 
   const toggleFollow = async (e: React.MouseEvent, targetId: string) => {
-    e.stopPropagation(); // 阻止事件冒泡，防止触发跳转主页
+    e.stopPropagation(); 
     if (!currentUser) return alert('请先登录');
 
     const isFollowing = followingIds.has(targetId);
     
     if (isFollowing) {
-      // 取消关注
       const { error } = await supabase.from('follows').delete().match({ follower_id: currentUser.id, following_id: targetId });
       if (!error) {
         const newSet = new Set(followingIds);
@@ -93,7 +98,6 @@ export default function DiscoverPage() {
         setFollowingIds(newSet);
       }
     } else {
-      // 关注
       const { error } = await supabase.from('follows').insert({ follower_id: currentUser.id, following_id: targetId });
       if (!error) {
         const newSet = new Set(followingIds);
@@ -135,28 +139,26 @@ export default function DiscoverPage() {
                   }`}
                 >
                   {/* 左侧：头像 */}
+                  {/* 3. 添加 lint 忽略注释，防止 Vercel 拦截 img 标签 */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img 
                     src={profile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.id}`} 
                     className="w-12 h-12 rounded-full border border-gray-100 object-cover shrink-0 bg-gray-50" 
-                    alt={profile.username} 
+                    alt={profile.username || 'user avatar'} 
                   />
                   
                   {/* 右侧：信息与按钮 */}
                   <div className="flex-1 min-w-0 flex flex-col pt-0.5">
-                    
-                    {/* 头部行：名字与按钮 */}
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex flex-col min-w-0 pr-4">
                         <h3 className="font-bold text-[15px] text-gray-900 hover:underline truncate">
                           {profile.username || '神秘用户'}
                         </h3>
-                        {/* 如果没有设置特别的账号ID，可以使用邮箱前缀或占位符 */}
                         <span className="text-[13px] text-gray-500 truncate">
                            @{profile.id.substring(0, 8)}
                         </span>
                       </div>
                       
-                      {/* 推特风关注按钮 */}
                       <button
                         onClick={(e) => toggleFollow(e, profile.id)}
                         className={`group px-4 py-1.5 rounded-full text-[14px] font-bold transition-all shrink-0 border ${
@@ -176,12 +178,10 @@ export default function DiscoverPage() {
                       </button>
                     </div>
                     
-                    {/* 简介区 */}
                     <p className="text-[14px] text-gray-900 mt-1 mb-2.5 leading-relaxed line-clamp-2">
                       {profile.bio || '这个人很懒，还没有写简介...'}
                     </p>
                     
-                    {/* 数据统计区 */}
                     <div className="flex items-center gap-4 text-[13px] text-gray-500">
                       <span className="hover:underline">
                         <span className="font-bold text-gray-900">{profile.followingCount}</span> 正在关注
