@@ -33,7 +33,7 @@ interface ServiceProvider {
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
 }
 
-// --- ⏱️ 倒计时组件 (已修复并复原) ---
+// --- ⏱️ 倒计时组件 ---
 function CountdownBadge({ dueDate, status }: { dueDate: string; status: StepStatus }) {
   const [timeLeft, setTimeLeft] = useState('');
   const [isOverdue, setIsOverdue] = useState(false);
@@ -138,28 +138,92 @@ export default function PropertyTradeRoom() {
   const [activeTab, setActiveTab] = useState<'DETAILS' | 'WORKFLOW' | 'PROVIDERS'>('DETAILS');
   const [currentImgIndex, setCurrentImgIndex] = useState(0);
 
-  // 👇 新增：点赞和收藏状态
+  // --- 🌟 点赞和收藏相关状态 ---
   const [isLiked, setIsLiked] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  // 1. 初始化时获取当前登录用户
+  useEffect(() => {
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setCurrentUserId(user.id);
+      }
+    };
+    getUser();
+  }, []);
   
-  // 👇 新增：处理点击事件的函数 (目前是前端 UI 切换，后续你可以补充 Supabase 的写入逻辑)
-  const handleToggleLike = () => {
-    setIsLiked(!isLiked);
-    // TODO: await supabase.from('likes').insert(...) 
+  // 2. 处理点赞同步逻辑 (乐观更新) - ✅ 修正表名为 octo_property_likes
+  const handleToggleLike = async () => {
+    if (!currentUserId) {
+      alert('请先登录后再进行点赞操作！');
+      return;
+    }
+
+    const previousState = isLiked;
+    setIsLiked(!isLiked); // 瞬间改变 UI
+
+    try {
+      if (previousState) {
+        // 原来是点赞的，现在取消
+        const { error } = await supabase
+          .from('octo_property_likes')
+          .delete()
+          .match({ property_id: propertyId, user_id: currentUserId });
+        if (error) throw error;
+      } else {
+        // 原来没点赞，现在新增
+        const { error } = await supabase
+          .from('octo_property_likes')
+          .insert({ property_id: propertyId, user_id: currentUserId });
+        if (error) throw error;
+      }
+    } catch (error: any) {
+      console.error("点赞同步失败:", error.message);
+      setIsLiked(previousState); // 失败则回滚 UI
+      alert('网络开小差了，点赞失败');
+    }
   };
 
-  const handleToggleSave = () => {
-    setIsSaved(!isSaved);
-    // TODO: await supabase.from('saved_properties').insert(...)
+  // 3. 处理收藏同步逻辑 (乐观更新) - ✅ 修正表名为 octo_property_saves
+  const handleToggleSave = async () => {
+    if (!currentUserId) {
+      alert('请先登录后再收藏房源！');
+      return;
+    }
+
+    const previousState = isSaved;
+    setIsSaved(!isSaved); // 瞬间改变 UI
+
+    try {
+      if (previousState) {
+        const { error } = await supabase
+          .from('octo_property_saves')
+          .delete()
+          .match({ property_id: propertyId, user_id: currentUserId });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('octo_property_saves')
+          .insert({ property_id: propertyId, user_id: currentUserId });
+        if (error) throw error;
+      }
+    } catch (error: any) {
+      console.error("收藏同步失败:", error.message);
+      setIsSaved(previousState); // 失败则回滚 UI
+      alert('网络开小差了，收藏失败');
+    }
   };
 
-  // 🌟 从 Supabase 获取真实数据 (修复了作用域错误)
+  // 🌟 从 Supabase 获取房源详情 + 用户点赞收藏状态
   useEffect(() => {
     const fetchProperty = async () => {
       setIsLoading(true);
       try {
         if (!propertyId) return;
 
+        // 获取房源详情
         const { data: item, error } = await supabase
           .from('octo_properties')
           .select('*')
@@ -218,6 +282,28 @@ export default function PropertyTradeRoom() {
             longitude: item.longitude
           });
         }
+
+        // --- 查询当前用户的点赞与收藏状态 (✅ 修正为 octo_ 表名) ---
+        if (currentUserId && propertyId) {
+          // 查点赞
+          const { data: likeData } = await supabase
+            .from('octo_property_likes')
+            .select('id')
+            .eq('property_id', propertyId)
+            .eq('user_id', currentUserId)
+            .maybeSingle();
+          if (likeData) setIsLiked(true);
+
+          // 查收藏
+          const { data: saveData } = await supabase
+            .from('octo_property_saves')
+            .select('id')
+            .eq('property_id', propertyId)
+            .eq('user_id', currentUserId)
+            .maybeSingle();
+          if (saveData) setIsSaved(true);
+        }
+
       } catch (err: any) {
         console.error("发生错误:", err);
         setProperty(null);
@@ -227,7 +313,7 @@ export default function PropertyTradeRoom() {
     };
 
     fetchProperty();
-  }, [propertyId]);
+  }, [propertyId, currentUserId]); 
 
   // OA 数据
   const tomorrow = new Date(Date.now() + 86400000).toISOString();
@@ -304,7 +390,6 @@ export default function PropertyTradeRoom() {
               </div>
             </div>
           </div>
-          {/* 👇 替换这个按钮 */}
           <button 
             onClick={() => router.push(`/messages?chatWith=${property.author_id}`)} 
             className="w-10 h-10 rounded-full bg-orange-50 text-orange-600 flex items-center justify-center hover:bg-orange-100 hover:scale-105 transition-all shadow-sm"
@@ -502,9 +587,8 @@ const renderProvidersRoom = () => {
             <p className="text-[16px] font-black text-orange-500 mt-1">{property.price}</p>
           </div>
           
-          {/* 👇 替换这里：新增的收藏与点赞按钮组 */}
           <div className="flex items-center gap-2">
-            {/* 收藏按钮 (Bookmark) */}
+            {/* 收藏按钮 */}
             <button 
               onClick={handleToggleSave}
               className={`shrink-0 p-2 rounded-full transition-colors ${isSaved ? 'bg-orange-50 text-orange-500' : 'bg-gray-50 text-gray-400 hover:text-orange-500 hover:bg-orange-50'}`}
@@ -514,7 +598,7 @@ const renderProvidersRoom = () => {
               </svg>
             </button>
 
-            {/* 点赞按钮 (Heart) */}
+            {/* 点赞按钮 */}
             <button 
               onClick={handleToggleLike}
               className={`shrink-0 p-2 rounded-full transition-colors ${isLiked ? 'bg-red-50 text-red-500' : 'bg-gray-50 text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
@@ -524,8 +608,6 @@ const renderProvidersRoom = () => {
               </svg>
             </button>
           </div>
-          {/* 👆 替换结束 */}
-
         </div>
       </div>
 
