@@ -5,6 +5,8 @@ import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+// 🌟 引入新创建的图片查看器组件
+import ImageViewer from './ImageViewer'; 
 
 interface InteractionState {
   likes: number;
@@ -76,6 +78,9 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
   const [interactions, setInteractions] = useState<Record<string, InteractionState>>({});
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
+  // 🌟 新增：控制全屏图片查看器的状态
+  const [viewerData, setViewerData] = useState<{ images: string[], index: number } | null>(null);
+
   // --- 🌟 对话框状态与 Promise 封装 ---
   const [dialogConfig, setDialogConfig] = useState<any>(null);
 
@@ -113,7 +118,6 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
       return;
     }
     
-    // 🌟 登录拦截优化
     if (!currentUserId) { 
       const goToLogin = await asyncConfirm('需要登录', '操作前请先登录，是否现在前往登录页面？');
       if (goToLogin) {
@@ -136,7 +140,6 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
   };
 
   const handleInteraction = async (type: string, post: any) => {
-    // 🌟 登录拦截优化
     if (!currentUserId) { 
       const goToLogin = await asyncConfirm('需要登录', '操作前请先登录，是否现在前往登录页面？');
       if (goToLogin) {
@@ -159,20 +162,18 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
       table = 'bookmarks';
     } else if (type === '转发') {
       if (!current.repostedByMe) {
-        // 🌟 使用优雅的 Dialog 输入转发内容
         const quoteContent = await asyncPrompt('转发动态', `转发 @${post.username || '用户'} 的动态：\n`);
-        if (quoteContent === null) return; // 用户点击了取消
+        if (quoteContent === null) return;
 
         updates.repostedByMe = true;
         updates.reposts = current.reposts + 1;
         table = 'reposts';
 
-        // 🌟 核心修复点：真正插入新帖子到 posts 表
         try {
           const { error: postError } = await supabase.from('posts').insert({
             author_id: currentUserId,
             content: quoteContent,
-            quote_post_id: post.id // 关联原贴ID
+            quote_post_id: post.id 
           });
           if (postError) throw postError;
           await asyncAlert('成功', '转发成功！刷新页面后可见。');
@@ -181,7 +182,6 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
           return; 
         }
       } else {
-        // 取消转发状态
         const isConfirmed = await asyncConfirm('取消转发', '确定要取消转发状态吗？\n(注: 已经生成的转发动态需手动前往主页删除)');
         if (!isConfirmed) return;
         
@@ -204,7 +204,6 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
   };
 
   const handleDelete = async (post: any) => {
-    // 🌟 删除帖子前使用自定义确认框
     const isConfirmed = await asyncConfirm('删除动态', '确定要删除这条动态吗？此操作不可撤销。');
     if (!isConfirmed) return;
 
@@ -234,6 +233,15 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
     <>
       {/* 🌟 挂载全局对话框组件 */}
       <DialogModal config={dialogConfig} />
+
+      {/* 🌟 挂载全局图片查看器组件 */}
+      {viewerData && (
+        <ImageViewer 
+          images={viewerData.images} 
+          initialIndex={viewerData.index} 
+          onClose={() => setViewerData(null)} 
+        />
+      )}
 
       <div className="space-y-4">
         {posts.map((post) => {
@@ -304,11 +312,20 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                       {post.content}
                     </p>
                     
+                    {/* 🌟 修改点 1：原帖图片的点击放大支持 */}
                     {post.image_urls && post.image_urls.length > 0 && (
                       <div className={`grid gap-2 mb-3 mt-1 ${post.image_urls.length === 1 ? 'grid-cols-1 sm:w-2/3' : post.image_urls.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
                         {post.image_urls.map((url: string, idx: number) => (
                           <div key={idx} className="relative aspect-[4/3] rounded-xl overflow-hidden border border-gray-100 bg-gray-50">
-                            <img src={url} alt="动态配图" className="w-full h-full object-cover hover:scale-105 transition-transform duration-300" />
+                            <img 
+                              src={url} 
+                              alt="动态配图" 
+                              onClick={(e) => {
+                                e.stopPropagation(); // 阻止跳转详情页
+                                setViewerData({ images: post.image_urls, index: idx });
+                              }}
+                              className="w-full h-full object-cover cursor-zoom-in hover:scale-105 transition-transform duration-300" 
+                            />
                           </div>
                         ))}
                       </div>
@@ -326,9 +343,18 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
                           className="mt-3 border border-gray-200 rounded-xl overflow-hidden hover:border-[#FF8C00] transition-colors cursor-pointer bg-white group/quote shadow-sm"
                         >
                           <div className="flex flex-col sm:flex-row">
+                            {/* 🌟 修改点 2：被转发帖子内图片的点击放大支持 */}
                             {quoteData.image_urls?.[0] && (
                               <div className="w-full sm:w-28 h-28 shrink-0 bg-gray-100 overflow-hidden">
-                                 <img src={quoteData.image_urls[0]} className="w-full h-full object-cover group-hover/quote:scale-105 transition-transform duration-300" alt="quote" />
+                                 <img 
+                                   src={quoteData.image_urls[0]} 
+                                   alt="quote" 
+                                   onClick={(e) => {
+                                     e.stopPropagation(); // 阻止跳转被转发帖子详情
+                                     setViewerData({ images: quoteData.image_urls, index: 0 });
+                                   }}
+                                   className="w-full h-full object-cover cursor-zoom-in group-hover/quote:scale-105 transition-transform duration-300" 
+                                 />
                               </div>
                             )}
                             <div className="p-3 flex-1 min-w-0 flex flex-col justify-center">

@@ -27,6 +27,9 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
   const [hostUnreadCount, setHostUnreadCount] = useState(0);
   const [guestUnreadCount, setGuestUnreadCount] = useState(0);
 
+  // 🌟 新增：互动通知未读数量 (点赞、关注、收藏)
+  const [notificationCount, setNotificationCount] = useState(0);
+
   useEffect(() => {
     async function fetchPopularCities() {
       setIsLoadingCities(true);
@@ -72,7 +75,7 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
       }
     };
 
-    // 🌟 2. 查房东未读的订单 (host_id 是自己，且 host_unread 是 true)
+    // 2. 查房东未读的订单
     const fetchHostUnread = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -88,7 +91,7 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
       }
     };
 
-    // 🌟 3. 查房客未读的订单 (guest_id 是自己，且 guest_unread 是 true)
+    // 3. 查房客未读的订单
     const fetchGuestUnread = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -104,20 +107,41 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
       }
     };
 
+    // 🌟 4. 查互动通知未读
+    const fetchNotificationUnread = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { count, error } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('receiver_id', user.id)
+        .eq('is_read', false);
+
+      if (!error && count !== null && isMounted) {
+        setNotificationCount(count);
+      }
+    };
+
     if (isSignedIn) {
       fetchUnreadCount();
       fetchHostUnread();
       fetchGuestUnread();
+      fetchNotificationUnread(); // 调用新写的拉取函数
 
       const channel = supabase.channel('global_unread_badge')
         // 监听私信表变动
         .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
           fetchUnreadCount();
         })
-        // 🌟 监听订单表变动，同时刷新双方的红点
+        // 监听订单表变动，同时刷新双方的红点
         .on('postgres_changes', { event: '*', schema: 'public', table: 'octo_bookings' }, () => {
           fetchHostUnread();
           fetchGuestUnread();
+        })
+        // 🌟 监听通知表变动
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => {
+          fetchNotificationUnread();
         })
         .subscribe();
 
@@ -125,10 +149,12 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
       const handleLocalRead = (e: any) => setUnreadMsgCount(prev => Math.max(0, prev - (e.detail?.readCount || 0)));
       const handleHostOrdersRead = (e: any) => setHostUnreadCount(prev => Math.max(0, prev - (e.detail?.count || 0)));
       const handleGuestOrdersRead = (e: any) => setGuestUnreadCount(prev => Math.max(0, prev - (e.detail?.count || 0)));
+      const handleNotificationsRead = (e: any) => setNotificationCount(prev => Math.max(0, prev - (e.detail?.count || 0))); // 🌟 本地擦除红点
       
       window.addEventListener('local_messages_read', handleLocalRead);
       window.addEventListener('local_host_orders_read', handleHostOrdersRead);
       window.addEventListener('local_guest_orders_read', handleGuestOrdersRead);
+      window.addEventListener('local_notifications_read', handleNotificationsRead);
 
       return () => {
         isMounted = false;
@@ -136,6 +162,7 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
         window.removeEventListener('local_messages_read', handleLocalRead);
         window.removeEventListener('local_host_orders_read', handleHostOrdersRead);
         window.removeEventListener('local_guest_orders_read', handleGuestOrdersRead);
+        window.removeEventListener('local_notifications_read', handleNotificationsRead);
       };
     }
   }, [isSignedIn]);
@@ -288,6 +315,21 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
                 )}
               </div>
               <span className={guestUnreadCount > 0 ? 'font-bold text-gray-900' : ''}>我的预定</span>
+            </Link>
+
+            {/* 🌟 新增：互动通知 */}
+            <Link href="/notifications" onClick={onMenuClick} className="flex items-center space-x-4 px-4 py-2.5 rounded-full hover:bg-gray-200/50 transition-all text-[16px] font-medium text-gray-900 w-fit pr-6 group relative">
+              <div className="relative">
+                <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+                </svg>
+                {notificationCount > 0 && (
+                  <div className="absolute -top-1.5 -right-2 bg-[#FF8C00] text-white text-[10px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center border-2 border-white shadow-sm flex items-center justify-center">
+                    {notificationCount > 99 ? '99+' : notificationCount}
+                  </div>
+                )}
+              </div>
+              <span className={notificationCount > 0 ? 'font-bold text-gray-900' : ''}>互动通知</span>
             </Link>
 
             <Link href="/messages" onClick={onMenuClick} className="flex items-center space-x-4 px-4 py-2.5 rounded-full hover:bg-gray-200/50 transition-all text-[16px] font-medium text-gray-900 w-fit pr-6 group relative">
