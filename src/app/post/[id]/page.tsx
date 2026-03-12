@@ -14,8 +14,15 @@ export default function PostDetailPage() {
   const [post, setPost] = useState<any>(null);
   const [comments, setComments] = useState<any[]>([]); 
   const [loading, setLoading] = useState(true);
+  
+  // 主贴评论状态
   const [newComment, setNewComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  
+  // 子评论回复相关的状态
+  const [replyingToId, setReplyingToId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [submittingReply, setSubmittingReply] = useState(false);
   
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
@@ -38,7 +45,7 @@ export default function PostDetailPage() {
       .from('posts')
       .select('*, quote_post:quote_post_id(id, content, image_urls, username), likes(count), comments(count), bookmarks(count), reposts(count)')
       .eq('id', postId)
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error('获取帖子失败:', error);
@@ -47,11 +54,16 @@ export default function PostDetailPage() {
     }
 
     if (postData) {
-      const { data: authorProfile } = await supabase
+      // ✅ 换回 profiles 表
+      const { data: authorProfile, error: userError } = await supabase
         .from('profiles')
         .select('username, avatar_url')
         .eq('id', postData.author_id)
-        .single();
+        .maybeSingle();
+        
+      if (userError) {
+         console.error('查询用户信息异常:', userError);
+      }
 
       let likedByMe = false, markedByMe = false, repostedByMe = false, isFollowingAuthor = false;
       if (localUserId) {
@@ -94,8 +106,9 @@ export default function PostDetailPage() {
     
     if (commentsData && commentsData.length > 0) {
       const userIds = Array.from(new Set(commentsData.map((c: any) => c.user_id)));
-      const { data: profiles } = await supabase.from('profiles').select('id, username, avatar_url').in('id', userIds);
-      const profileMap = new Map(profiles?.map((p: any) => [p.id, p]) || []);
+      // ✅ 换回 profiles 表
+      const { data: profilesData } = await supabase.from('profiles').select('id, username, avatar_url').in('id', userIds);
+      const profileMap = new Map(profilesData?.map((p: any) => [p.id, p]) || []);
       
       setComments(commentsData.map((c: any) => ({
         ...c,
@@ -111,7 +124,7 @@ export default function PostDetailPage() {
     fetchComments();
   }, [fetchPostDetails, fetchComments]);
 
-  // 4. 发表新评论
+  // 4. 发表主贴的新评论
   const handleSubmitComment = async () => {
     if (!newComment.trim() || !currentUserId) return;
     setSubmitting(true);
@@ -132,7 +145,31 @@ export default function PostDetailPage() {
     }
   };
 
-  // 5. 删除评论
+  // 5. 发表对某条评论的回复
+  const handleSubmitReply = async (targetComment: any) => {
+    if (!replyText.trim() || !currentUserId) return;
+    setSubmittingReply(true);
+    try {
+      const finalContent = `回复 @${targetComment.user?.username || '未知用户'}：${replyText.trim()}`;
+      const { error } = await supabase.from('comments').insert({
+        post_id: postId,
+        user_id: currentUserId,
+        content: finalContent,
+      });
+      if (error) throw error;
+      
+      setReplyingToId(null);
+      setReplyText('');
+      fetchComments();
+      fetchPostDetails(); 
+    } catch (err: any) {
+      alert('回复失败: ' + err.message);
+    } finally {
+      setSubmittingReply(false);
+    }
+  };
+
+  // 6. 删除评论
   const handleDeleteComment = async (commentId: string) => {
     const isConfirmed = window.confirm('确定要删除这条评论吗？此操作不可撤销。');
     if (!isConfirmed) return;
@@ -165,7 +202,7 @@ export default function PostDetailPage() {
         <PostList posts={[post]} currentUserId={currentUserId} fetching={false} />
       </div>
 
-      {/* 发表评论框 */}
+      {/* 发表主评论框 */}
       <div className="mt-6 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm focus-within:border-[#FF8C00] focus-within:ring-1 focus-within:ring-[#FF8C00] transition-all">
         <textarea
           value={newComment}
@@ -199,7 +236,7 @@ export default function PostDetailPage() {
         ) : (
           <div className="space-y-4">
             {comments.map((comment: any) => (
-              <div key={comment.id} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+              <div key={comment.id} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm transition-all hover:border-orange-100 group">
                 <div className="flex items-start gap-3">
                   {/* 头像 */}
                   <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#FF8C00] to-yellow-400 flex items-center justify-center text-white text-[15px] font-bold shrink-0 overflow-hidden mt-0.5">
@@ -217,11 +254,31 @@ export default function PostDetailPage() {
                           {comment.user?.username || '未知用户'}
                         </span>
                         
-                        {/* 🌟 替换为精致的 SVG 垃圾桶图标 */}
+                        <span className="text-[11px] text-gray-400 font-medium shrink-0 ml-1">
+                          {new Date(comment.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => {
+                            if (replyingToId === comment.id) {
+                              setReplyingToId(null);
+                              setReplyText('');
+                            } else {
+                              setReplyingToId(comment.id);
+                              setReplyText('');
+                            }
+                          }}
+                          className="text-[12px] font-bold text-gray-500 hover:text-[#FF8C00] bg-gray-50 hover:bg-orange-50 px-2.5 py-1 rounded-full transition-colors"
+                        >
+                          回复
+                        </button>
+                        
                         {currentUserId === comment.user_id && (
                           <button
                             onClick={() => handleDeleteComment(comment.id)}
-                            className="text-gray-400 hover:text-red-500 bg-transparent hover:bg-red-50 p-1.5 rounded-full transition-colors shrink-0"
+                            className="text-gray-400 hover:text-red-500 bg-transparent hover:bg-red-50 p-1 rounded-full transition-colors shrink-0"
                             title="删除评论"
                           >
                             <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
@@ -230,15 +287,49 @@ export default function PostDetailPage() {
                           </button>
                         )}
                       </div>
-                      
-                      <span className="text-[11px] text-gray-400 font-medium shrink-0">
-                        {new Date(comment.created_at).toLocaleDateString()}
-                      </span>
                     </div>
                     
                     <p className="text-gray-800 text-[14px] mt-1.5 leading-relaxed break-words">
-                      {comment.content}
+                      {comment.content.startsWith('回复 @') ? (
+                        <>
+                          <span className="text-[#FF8C00] font-medium mr-1">
+                            {comment.content.split('：')[0]}：
+                          </span>
+                          {comment.content.split('：').slice(1).join('：')}
+                        </>
+                      ) : (
+                        comment.content
+                      )}
                     </p>
+
+                    {replyingToId === comment.id && (
+                      <div className="mt-3 pt-3 border-t border-gray-100 animate-in fade-in slide-in-from-top-2 duration-200">
+                        <textarea
+                          autoFocus
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          placeholder={`回复 @${comment.user?.username || '用户'}...`}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-[13px] text-gray-900 outline-none focus:bg-white focus:ring-2 focus:ring-[#FF8C00]/20 focus:border-[#FF8C00]/50 transition-all resize-none"
+                          rows={2}
+                        />
+                        <div className="flex justify-end mt-2 gap-2">
+                          <button 
+                            onClick={() => { setReplyingToId(null); setReplyText(''); }}
+                            className="px-4 py-1.5 rounded-full text-[12px] font-bold text-gray-500 hover:bg-gray-100 transition-colors"
+                          >
+                            取消
+                          </button>
+                          <button 
+                            onClick={() => handleSubmitReply(comment)}
+                            disabled={!replyText.trim() || submittingReply}
+                            className="px-4 py-1.5 rounded-full text-[12px] font-bold text-white bg-[#FF8C00] hover:bg-[#e07b00] disabled:opacity-50 transition-colors shadow-sm min-w-[60px]"
+                          >
+                            {submittingReply ? '发送中...' : '发送'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                   </div>
                 </div>
               </div>
