@@ -22,16 +22,26 @@ export default function DiscoverPage() {
       setCurrentUser(user);
 
       // 1. 获取所有博主 (排除自己)
-      const { data: profilesData } = await supabase
-        .from('profiles')
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles') // 💡 如果你其实用的是 users 表，这里改成 'users'
         .select('*')
         .neq('id', user?.id || '');
 
-      // 2. 获取所有的关注关系 (用于计算粉丝数和关注数)
-      // 注意：这里为了前端快速实现拉取了全量 follows，后续数据量大了可以改写为 Supabase RPC 视图
-      const { data: allFollows } = await supabase
+      // 🚨 打印报错信息！看看 Supabase 到底拦截了什么
+      if (profilesError) {
+        console.error("🚨 获取博主列表失败，数据库报错:", profilesError.message);
+      } else {
+        console.log("✅ 成功拿到博主数据，数量:", profilesData?.length);
+      }
+
+      // 2. 获取所有的关注关系
+      const { data: allFollows, error: followsError } = await supabase
         .from('follows')
         .select('follower_id, following_id');
+
+      if (followsError) {
+         console.error("🚨 获取关注列表失败，可能是 follows 表没开权限:", followsError.message);
+      }
 
       // 3. 计算每个人的数据
       const statsMap: Record<string, { followers: number; following: number }> = {};
@@ -42,18 +52,9 @@ export default function DiscoverPage() {
       const myFollowingSet = new Set<string>();
 
       allFollows?.forEach(f => {
-        // 记录我关注的人
-        if (f.follower_id === user?.id) {
-          myFollowingSet.add(f.following_id);
-        }
-        // 计算全站用户的粉丝数
-        if (statsMap[f.following_id]) {
-          statsMap[f.following_id].followers++;
-        }
-        // 计算全站用户的关注数
-        if (statsMap[f.follower_id]) {
-          statsMap[f.follower_id].following++;
-        }
+        if (f.follower_id === user?.id) myFollowingSet.add(f.following_id);
+        if (statsMap[f.following_id]) statsMap[f.following_id].followers++;
+        if (statsMap[f.follower_id]) statsMap[f.follower_id].following++;
       });
 
       // 4. 组装最终数据
@@ -64,16 +65,14 @@ export default function DiscoverPage() {
           followingCount: statsMap[p.id]?.following || 0
         }));
         
-        // 可选：按粉丝数量排序，把热门博主排在前面
         enrichedProfiles.sort((a, b) => b.followersCount - a.followersCount);
-        
         setProfiles(enrichedProfiles);
       }
 
       setFollowingIds(myFollowingSet);
       
     } catch (error) {
-      console.error(error);
+      console.error("代码运行崩溃:", error);
     } finally {
       setLoading(false);
     }
