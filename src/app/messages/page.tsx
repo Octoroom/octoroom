@@ -42,12 +42,17 @@ function MessagesContent() {
   
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [selectedImages, setSelectedImages] = useState<{file: File; previewUrl: string}[]>([]);
+  const [viewerImageUrl, setViewerImageUrl] = useState<string | null>(null);
   
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeConvoRef = useRef<Conversation | null>(null);
   
-  // 🌟 新增：Emoji 与 GIF 面板状态
+  // 🌟 新增：最外层滑动容器的 Ref
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showGifPicker, setShowGifPicker] = useState(false);
   const [gifSearch, setGifSearch] = useState('');
@@ -69,13 +74,13 @@ function MessagesContent() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // 🌟 新增：GIF 搜索与获取逻辑 (使用 Giphy 官方测试 Key)
+  // GIF 搜索逻辑
   useEffect(() => {
     if (!showGifPicker) return;
     const fetchGifs = async () => {
       setLoadingGifs(true);
       try {
-        const apiKey = 'GlVGYHqc3SyCEw02A0BcbXUOW3aFm7hB'; // Giphy Public Beta Key
+        const apiKey = 'GlVGYHqc3SyCEw02A0BcbXUOW3aFm7hB';
         const endpoint = gifSearch.trim()
           ? `https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${encodeURIComponent(gifSearch)}&limit=20`
           : `https://api.giphy.com/v1/gifs/trending?api_key=${apiKey}&limit=20`;
@@ -88,8 +93,7 @@ function MessagesContent() {
         setLoadingGifs(false);
       }
     };
-
-    const timer = setTimeout(fetchGifs, 500); // 增加防抖
+    const timer = setTimeout(fetchGifs, 500);
     return () => clearTimeout(timer);
   }, [gifSearch, showGifPicker]);
 
@@ -165,8 +169,28 @@ function MessagesContent() {
     fetchMessages();
   }, [activeConvo]);
 
-  // 3. 核心扫荡机制：0 延迟消灭红点
+  // 🌟 滑动到左侧列表
+  const scrollToLeft = () => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({ left: 0, behavior: 'smooth' });
+    }
+  };
+
+  // 🌟 滑动到右侧聊天
+  const scrollToRight = () => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({ left: scrollContainerRef.current.scrollWidth, behavior: 'smooth' });
+    }
+  };
+
+  // 3. 选中用户并处理滑动逻辑
   const handleSelectConvo = (convo: Conversation, overrideUserId?: string) => {
+    // 🌟 核心小巧思：如果用户点击的是【当前正在聊天的对象】，则展开左侧列表供其查看其他好友
+    if (activeConvo?.partner_id === convo.partner_id) {
+      scrollToLeft();
+      return;
+    }
+
     setActiveConvo(convo);
     const activeUserId = overrideUserId || currentUserId;
     if (convo.unread_count > 0 && activeUserId) {
@@ -175,9 +199,12 @@ function MessagesContent() {
       window.dispatchEvent(new CustomEvent('local_messages_read', { detail: { readCount: countToClear } }));
       supabase.from('messages').update({ is_read: true }).in('conversation_id', convo.all_convo_ids).eq('sender_id', convo.partner_id).eq('is_read', false).then();
     }
+    
+    // 🌟 选中新用户后，自动滑出右侧聊天界面
+    setTimeout(scrollToRight, 100);
   };
 
-  // 4. WebSocket 实时监听新消息
+  // 4. WebSocket 实时监听
   useEffect(() => {
     if (!currentUserId) return;
     const channel = supabase.channel('realtime_messages')
@@ -202,7 +229,7 @@ function MessagesContent() {
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
-  // 🌟 核心重构：将文本、图片、GIF 发送的底层逻辑合并，彻底告别重复代码！
+  // 核心消息发送逻辑
   const performSend = async (contentStr: string, imgUrlStr?: string) => {
     if (!activeConvo || !currentUserId) return;
     let finalConvoId = activeConvo.id;
@@ -228,7 +255,6 @@ function MessagesContent() {
     await supabase.from('conversations').update({ last_message: contentStr, updated_at: new Date().toISOString() }).eq('id', finalConvoId);
   };
 
-  // 5.1 发送文本
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMsg.trim()) return;
@@ -238,26 +264,49 @@ function MessagesContent() {
     try { await performSend(msg); } catch (err) { alert("消息发送失败"); }
   };
 
-  // 5.2 发送本地图片
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !currentUserId) return;
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
     if (fileInputRef.current) fileInputRef.current.value = '';
-
-    setIsUploading(true);
-    try {
-      const fileExt = file.name.split('.').pop();
-      const filePath = `${currentUserId}/${uuidv4()}.${fileExt}`;
-      const { error: uploadError } = await supabase.storage.from('chat-images').upload(filePath, file);
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage.from('chat-images').getPublicUrl(filePath);
-      await performSend('[图片]', publicUrl);
-    } catch (err) { alert("图片上传失败，请稍后重试"); } 
-    finally { setIsUploading(false); }
+    const newSelected = files.map(file => ({ file, previewUrl: URL.createObjectURL(file) }));
+    setSelectedImages(prev => [...prev, ...newSelected]);
+    setShowEmojiPicker(false); setShowGifPicker(false);
   };
 
-  // 5.3 发送 GIF 动图
+  const handleRemovePreview = (index: number) => {
+    setSelectedImages(prev => {
+      const updated = [...prev];
+      URL.revokeObjectURL(updated[index].previewUrl);
+      updated.splice(index, 1);
+      return updated;
+    });
+  };
+
+  const handleCancelAllPreviews = () => {
+    selectedImages.forEach(img => URL.revokeObjectURL(img.previewUrl));
+    setSelectedImages([]);
+  };
+
+  const handleConfirmSendImages = async () => {
+    if (selectedImages.length === 0 || !currentUserId) return;
+    setIsUploading(true);
+    try {
+      for (const img of selectedImages) {
+        const fileExt = img.file.name.split('.').pop();
+        const filePath = `${currentUserId}/${uuidv4()}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from('chat-images').upload(filePath, img.file);
+        if (uploadError) throw uploadError;
+        const { data: { publicUrl } } = supabase.storage.from('chat-images').getPublicUrl(filePath);
+        await performSend('[图片]', publicUrl);
+      }
+      setSelectedImages([]);
+    } catch (err) { 
+      alert("图片上传失败"); 
+    } finally { 
+      setIsUploading(false); 
+    }
+  };
+
   const handleSendGif = async (gifUrl: string) => {
     setShowGifPicker(false);
     try { await performSend('[GIF动图]', gifUrl); } catch (err) { alert("GIF发送失败"); }
@@ -274,13 +323,21 @@ function MessagesContent() {
   );
 
   return (
-    <main className="flex-1 max-w-4xl mx-auto w-full min-h-screen bg-white flex overflow-hidden border-x border-gray-100">
+    // 🌟 外层滚动容器：恢复 max-w-4xl，增加 overflow-x-auto, snap-x 及 隐藏滚动条样式
+    <main 
+      ref={scrollContainerRef}
+      className="flex-1 max-w-4xl mx-auto w-full min-h-screen bg-white flex overflow-x-auto snap-x snap-mandatory border-x border-gray-100 shadow-sm relative [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+      style={{ scrollBehavior: 'smooth' }}
+    >
       
-      {/* 左侧：私信列表 */}
-      <div className={`w-full md:w-80 border-r border-gray-100 flex flex-col ${activeConvo ? 'hidden md:flex' : 'flex'}`}>
+      {/* 🌟 左侧：私信列表 -> 锁死 320px，点击任何空白处向左滑到底 */}
+      <div 
+        onClick={scrollToLeft}
+        className="w-[320px] shrink-0 border-r border-gray-100 flex flex-col snap-start bg-white"
+      >
         <div className="p-4 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between shrink-0">
           <h1 className="text-[18px] font-black text-gray-900">全部私信</h1>
-          <button onClick={() => router.push('/companions')} className="text-sm font-bold text-orange-500 hover:underline">去找搭子</button>
+          <button onClick={(e) => { e.stopPropagation(); router.push('/companions'); }} className="text-sm font-bold text-orange-500 hover:underline">去找搭子</button>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -290,11 +347,18 @@ function MessagesContent() {
             conversations.map(convo => (
               <div 
                 key={convo.partner_id} 
-                onClick={() => handleSelectConvo(convo)}
-                className={`flex items-center gap-3 p-4 cursor-pointer transition-colors border-b border-gray-50 ${activeConvo?.partner_id === convo.partner_id ? 'bg-orange-50' : 'hover:bg-gray-50'}`}
+                onClick={(e) => {
+                  e.stopPropagation(); // 阻止触发父级的 scrollToLeft
+                  handleSelectConvo(convo);
+                }}
+                className={`flex items-center gap-3 py-4 pr-4 cursor-pointer transition-all border-b border-gray-50 ${
+                  activeConvo?.partner_id === convo.partner_id 
+                    ? 'bg-orange-50 border-l-4 border-orange-500 pl-3' 
+                    : 'hover:bg-gray-50 border-l-4 border-transparent pl-3'
+                }`}
               >
-                <div className="relative">
-                  <img src={convo.partner_avatar} className="w-12 h-12 rounded-full object-cover border border-gray-200 hover:opacity-80 transition-opacity" alt="avatar" onClick={(e) => { e.stopPropagation(); handleGoToProfile(convo.partner_id); }} />
+                <div className="relative shrink-0">
+                  <img src={convo.partner_avatar} className="w-12 h-12 rounded-full object-cover border border-gray-200" alt="avatar" />
                   {convo.unread_count > 0 && <div className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center border-2 border-white shadow-sm">{convo.unread_count > 99 ? '99+' : convo.unread_count}</div>}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -310,16 +374,24 @@ function MessagesContent() {
         </div>
       </div>
 
-      {/* 右侧：聊天主界面 */}
-      <div className={`flex-1 flex flex-col bg-gray-50/30 relative ${!activeConvo ? 'hidden md:flex' : 'flex'}`}>
+      {/* 🌟 右侧：聊天主界面 -> 宽度使用魔法公式 calc(100% - 80px)，确保永远露出 80px 的左侧用于返回 */}
+      <div 
+        onClick={scrollToRight}
+        className="w-[calc(100%-80px)] shrink-0 flex flex-col bg-gray-50/30 relative snap-end"
+      >
         {activeConvo ? (
           <>
             <div className="h-16 border-b border-gray-100 bg-white/90 backdrop-blur-md flex items-center justify-between px-4 shrink-0 sticky top-0 z-10">
               <div className="flex items-center">
-                <button onClick={() => setActiveConvo(null)} className="md:hidden mr-3 p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full">
+                {/* 🌟 将返回按钮的逻辑改为滑动到左侧 */}
+                <button 
+                  onClick={(e) => { e.stopPropagation(); scrollToLeft(); }} 
+                  className="mr-3 p-2 -ml-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors" 
+                  title="展开列表"
+                >
                   <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
                 </button>
-                <div className="flex items-center cursor-pointer group px-2 py-1 -ml-2 rounded-lg hover:bg-gray-50 transition-colors" onClick={() => handleGoToProfile(activeConvo.partner_id)}>
+                <div className="flex items-center cursor-pointer group px-2 py-1 -ml-2 rounded-lg hover:bg-gray-50 transition-colors" onClick={(e) => { e.stopPropagation(); handleGoToProfile(activeConvo.partner_id); }}>
                   <img src={activeConvo.partner_avatar} className="w-8 h-8 rounded-full object-cover mr-2.5 border border-gray-200" alt="avatar" />
                   <h2 className="font-bold text-[15px] text-gray-900 group-hover:text-orange-500 transition-colors">{activeConvo.partner_name}</h2>
                   <svg className="w-4 h-4 ml-1 text-gray-400 group-hover:text-orange-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg>
@@ -336,12 +408,18 @@ function MessagesContent() {
                   return (
                     <div key={msg.id} className={`flex items-end ${isMe ? 'justify-end' : 'justify-start'} gap-2`}>
                       {!isMe && (
-                        <img src={activeConvo.partner_avatar} alt="avatar" className="w-8 h-8 rounded-full object-cover cursor-pointer border border-gray-100 hover:opacity-80 transition-opacity flex-shrink-0 mb-0.5" onClick={() => handleGoToProfile(activeConvo.partner_id)} />
+                        <img src={activeConvo.partner_avatar} alt="avatar" className="w-8 h-8 rounded-full object-cover cursor-pointer border border-gray-100 hover:opacity-80 transition-opacity flex-shrink-0 mb-0.5" onClick={(e) => { e.stopPropagation(); handleGoToProfile(activeConvo.partner_id); }} />
                       )}
                       
                       <div className={`max-w-[70%] px-4 py-2.5 rounded-[18px] text-[14.5px] leading-relaxed shadow-sm ${isMe ? 'bg-gray-900 text-white rounded-br-sm' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-sm'}`}>
                         {msg.image_url ? (
-                          <img src={msg.image_url} alt="chat-image" className="max-w-full rounded-lg cursor-zoom-in" style={{ maxHeight: '200px', objectFit: 'contain' }} onClick={() => window.open(msg.image_url!, '_blank')} />
+                          <img 
+                            src={msg.image_url} 
+                            alt="chat-image" 
+                            className="max-w-full rounded-lg cursor-zoom-in hover:opacity-90 transition-opacity" 
+                            style={{ maxHeight: '200px', objectFit: 'contain' }} 
+                            onClick={(e) => { e.stopPropagation(); setViewerImageUrl(msg.image_url!); }} 
+                          />
                         ) : (
                           msg.content
                         )}
@@ -353,27 +431,47 @@ function MessagesContent() {
               <div ref={messagesEndRef} className="h-1" />
             </div>
 
-            {/* 🌟 底部发送栏重构 */}
             <div className="p-4 bg-white border-t border-gray-100 shrink-0 relative">
+              {selectedImages.length > 0 && (
+                <div className="absolute bottom-full mb-2 left-4 right-4 z-50 bg-white p-3 rounded-2xl shadow-xl border border-gray-200 animate-in fade-in slide-in-from-bottom-2">
+                  <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: 'thin' }}>
+                    {selectedImages.map((img, index) => (
+                      <div key={index} className="relative group shrink-0">
+                        <img src={img.previewUrl} alt={`Preview ${index}`} className="h-24 w-24 object-cover rounded-lg bg-gray-50 border border-gray-100" />
+                        <button onClick={(e) => { e.stopPropagation(); handleRemovePreview(index); }} className="absolute -top-2 -right-2 bg-gray-900 text-white rounded-full p-1 shadow-md hover:bg-red-500 transition-colors">
+                          <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex justify-between items-center border-t border-gray-50 pt-2">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); handleCancelAllPreviews(); }} className="text-sm text-gray-400 hover:text-gray-600 font-medium">全部取消</button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleConfirmSendImages(); }}
+                      disabled={isUploading}
+                      className="bg-orange-500 text-white px-5 py-1.5 rounded-full text-[13px] font-bold shadow-md hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {isUploading ? <><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div> 发送中...</> : <>发送 {selectedImages.length} 张图片</>}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <form onSubmit={handleSendMessage} className="flex gap-2 items-center">
-                
-                {/* 1. 图片上传 */}
-                <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" />
-                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2.5 text-gray-500 hover:bg-gray-100 hover:text-orange-500 rounded-full transition-colors disabled:opacity-50" title="发送图片">
-                  {isUploading ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-orange-500"></div> : <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" /></svg>}
+                <input type="file" accept="image/*" multiple ref={fileInputRef} onChange={handleImageSelect} className="hidden" />
+                <button type="button" onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }} disabled={isUploading} className="p-2.5 text-gray-500 hover:bg-gray-100 hover:text-orange-500 rounded-full transition-colors disabled:opacity-50" title="发送图片">
+                   <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" /></svg>
                 </button>
 
-                {/* 2. GIF 按钮 */}
                 <div className="relative">
-                  <button type="button" onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); }} className={`p-2.5 rounded-full transition-colors flex items-center justify-center ${showGifPicker ? 'bg-orange-50 text-orange-500' : 'text-gray-500 hover:bg-gray-100 hover:text-orange-500'}`} title="发送动图">
+                  <button type="button" onClick={(e) => { e.stopPropagation(); setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); }} className={`p-2.5 rounded-full transition-colors flex items-center justify-center ${showGifPicker ? 'bg-orange-50 text-orange-500' : 'text-gray-500 hover:bg-gray-100 hover:text-orange-500'}`} title="发送动图">
                     <span className="text-[11px] font-black border-2 border-current rounded-[4px] px-1 py-0.5 leading-none tracking-tighter">GIF</span>
                   </button>
-                  
-                  {/* GIF 浮窗 */}
                   {showGifPicker && (
                     <div ref={gifRef} className="absolute bottom-14 left-0 md:-left-12 w-80 bg-white border border-gray-100 rounded-2xl shadow-2xl z-50 overflow-hidden flex flex-col h-[350px]">
                       <div className="p-3 border-b border-gray-100 bg-gray-50/80">
-                         <input type="text" placeholder="搜索 Giphy 动图..." value={gifSearch} onChange={(e) => setGifSearch(e.target.value)} className="w-full bg-white border border-gray-200 rounded-full px-4 py-2 text-sm outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all shadow-sm" />
+                         <input type="text" placeholder="搜索 Giphy 动图..." value={gifSearch} onChange={(e) => setGifSearch(e.target.value)} onClick={(e) => e.stopPropagation()} className="w-full bg-white border border-gray-200 rounded-full px-4 py-2 text-sm outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all shadow-sm" />
                       </div>
                       <div className="flex-1 overflow-y-auto p-2">
                         {loadingGifs ? (
@@ -381,7 +479,7 @@ function MessagesContent() {
                         ) : (
                            <div className="grid grid-cols-2 gap-2">
                              {gifs.map(gif => (
-                               <img key={gif.id} src={gif.images.fixed_width.url} alt="gif" onClick={() => handleSendGif(gif.images.fixed_width.url)} className="w-full h-24 object-cover rounded-lg cursor-pointer hover:opacity-80 hover:ring-2 hover:ring-orange-500 transition-all" />
+                               <img key={gif.id} src={gif.images.fixed_width.url} alt="gif" onClick={(e) => { e.stopPropagation(); handleSendGif(gif.images.fixed_width.url); }} className="w-full h-24 object-cover rounded-lg cursor-pointer hover:opacity-80 hover:ring-2 hover:ring-orange-500 transition-all" />
                              ))}
                            </div>
                         )}
@@ -390,24 +488,20 @@ function MessagesContent() {
                   )}
                 </div>
 
-                {/* 3. Emoji 按钮 */}
                 <div className="relative">
-                  <button type="button" onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }} className={`p-2.5 rounded-full transition-colors flex items-center justify-center ${showEmojiPicker ? 'bg-orange-50 text-orange-500' : 'text-gray-500 hover:bg-gray-100 hover:text-orange-500'}`} title="发送表情">
+                  <button type="button" onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }} className={`p-2.5 rounded-full transition-colors flex items-center justify-center ${showEmojiPicker ? 'bg-orange-50 text-orange-500' : 'text-gray-500 hover:bg-gray-100 hover:text-orange-500'}`} title="发送表情">
                     <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M15.182 15.182a4.5 4.5 0 01-6.364 0M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75zm3.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75z" /></svg>
                   </button>
-                  
-                  {/* Emoji 浮窗 */}
                   {showEmojiPicker && (
-                    <div ref={emojiRef} className="absolute bottom-14 left-0 md:-left-24 z-50 shadow-2xl rounded-2xl overflow-hidden border border-gray-100">
+                    <div ref={emojiRef} onClick={(e) => e.stopPropagation()} className="absolute bottom-14 left-0 md:-left-24 z-50 shadow-2xl rounded-2xl overflow-hidden border border-gray-100">
                       <EmojiPicker onEmojiClick={(e) => setInputMsg(prev => prev + e.emoji)} theme="light" />
                     </div>
                   )}
                 </div>
 
-                {/* 文本输入框 */}
-                <input type="text" placeholder="说点什么..." value={inputMsg} onChange={(e) => setInputMsg(e.target.value)} className="flex-1 bg-gray-50 border border-gray-200 rounded-full px-5 py-3 text-[14px] outline-none focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition-all" />
+                <input type="text" placeholder="说点什么..." value={inputMsg} onChange={(e) => setInputMsg(e.target.value)} onClick={(e) => e.stopPropagation()} className="flex-1 bg-gray-50 border border-gray-200 rounded-full px-5 py-3 text-[14px] outline-none focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition-all" />
                 
-                <button type="submit" disabled={!inputMsg.trim() || isUploading} className="w-11 h-11 bg-orange-500 rounded-full flex items-center justify-center text-white shadow-md hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0">
+                <button type="submit" disabled={!inputMsg.trim() || isUploading} onClick={(e) => e.stopPropagation()} className="w-11 h-11 bg-orange-500 rounded-full flex items-center justify-center text-white shadow-md hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0">
                   <svg fill="currentColor" viewBox="0 0 24 24" className="w-4 h-4 ml-1"><path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" /></svg>
                 </button>
               </form>
@@ -416,10 +510,24 @@ function MessagesContent() {
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
             <svg fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor" className="w-20 h-20 mb-4 opacity-50"><path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" /></svg>
-            <p className="text-sm font-medium">点击左侧好友开始聊天</p>
+            <p className="text-sm font-medium">点击左侧缝隙展开列表</p>
           </div>
         )}
       </div>
+
+      {viewerImageUrl && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setViewerImageUrl(null)}
+        >
+          <button onClick={() => setViewerImageUrl(null)} className="absolute top-6 right-6 md:top-8 md:right-8 text-white/60 hover:text-white bg-black/40 hover:bg-black/80 rounded-full p-2.5 transition-all z-50">
+            <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-7 h-7"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+          <div className="relative max-w-[95vw] max-h-[90vh] flex items-center justify-center">
+            <img src={viewerImageUrl} alt="Full size" className="max-w-full max-h-[90vh] object-contain rounded-md shadow-2xl select-none" onClick={(e) => e.stopPropagation()} />
+          </div>
+        </div>
+      )}
 
     </main>
   );
