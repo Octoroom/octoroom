@@ -19,12 +19,11 @@ const getDisplayImages = (property: any) => {
     if (urls.length > 0) return urls;
   }
   const fallbackId = property?.id || 'default';
-  // 替换为更符合新西兰本地大房子的网图
   const propertyImages = [
-    "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=600&q=80", // 现代独栋
-    "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=600&q=80", // 奢华大宅
-    "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=600&q=80", // 带泳池
-    "https://images.unsplash.com/photo-1583608205776-bfd35f0d9f83?auto=format&fit=crop&w=600&q=80"  // 经典洋房
+    "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=600&q=80",
+    "https://images.unsplash.com/photo-1583608205776-bfd35f0d9f83?auto=format&fit=crop&w=600&q=80"
   ];
   const idx1 = fallbackId.charCodeAt(0) % propertyImages.length;
   const idx2 = (idx1 + 1) % propertyImages.length;
@@ -32,7 +31,6 @@ const getDisplayImages = (property: any) => {
   return [propertyImages[idx1], propertyImages[idx2], propertyImages[idx3]];
 };
 
-// 🌟 企业级高级质感文案引擎 (售房版)
 const buildAwesomePropertyContent = (
   title: string, city: string, addressName: string, propertyType: string, 
   saleMethod: string, priceAmount: string, 
@@ -62,7 +60,6 @@ const buildAwesomePropertyContent = (
 房东直售免中介费！对这套房子感兴趣的搭子，欢迎直接私信我了解更多详情与 Open Home 安排！`;
 };
 
-// 复用您的轮播图组件
 function PropertyCardSlider({ images, viewMode, city, className }: { images: string[], viewMode: string, city: string, className?: string }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const sliderRef = useRef<HTMLDivElement>(null);
@@ -85,7 +82,6 @@ function PropertyCardSlider({ images, viewMode, city, className }: { images: str
 
   return (
     <div className={`relative bg-gray-100 overflow-hidden group/slider ${className}`}>
-      
       <div ref={sliderRef} className="w-full h-full flex overflow-x-auto snap-x snap-mandatory scrollbar-hide" onScroll={handleScroll}>
         {images.map((img, idx) => (
           <div key={idx} className="w-full h-full flex-shrink-0 snap-center relative">
@@ -118,7 +114,6 @@ function PropertyCardSlider({ images, viewMode, city, className }: { images: str
           </div>
         </>
       )}
-      
     </div>
   );
 }
@@ -133,6 +128,12 @@ export default function MyPropertiesPage() {
   const [enquiries, setEnquiries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // 状态管理
+  const [userLikes, setUserLikes] = useState<Record<string, boolean>>({});
+  const [userSaves, setUserSaves] = useState<Record<string, boolean>>({});
+  const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
+  const [saveCounts, setSaveCounts] = useState<Record<string, number>>({});
+
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
@@ -145,7 +146,6 @@ export default function MyPropertiesPage() {
   const [customFeatures, setCustomFeatures] = useState<{id: string, label: string}[]>([]);
   const [newFeature, setNewFeature] = useState('');
 
-  // 🌟 表单状态中加入 syncToPost 开关，默认为 true
   const [formData, setFormData] = useState({
     city: '', title: '', addressName: '', lat: 0, lng: 0,
     propertyType: '独立别墅 (House)', 
@@ -156,7 +156,7 @@ export default function MyPropertiesPage() {
     imageMode: 'system' as 'system' | 'custom',
     coverImageFiles: [] as File[],        
     coverImagePreviews: [] as string[],
-    syncToPost: true // 👈 同步到日常动态开关
+    syncToPost: true
   });
 
   const baseFeatureOptions = [
@@ -173,13 +173,32 @@ export default function MyPropertiesPage() {
       if (!user) { setLoading(false); return; }
 
       const { data: propertiesData } = await supabase.from('octo_properties').select('*').eq('author_id', user.id).order('created_at', { ascending: false });
-      setProperties(propertiesData || []);
+      const fetchedProps = propertiesData || [];
+      setProperties(fetchedProps);
 
       const { data: enquiriesData } = await supabase.from('octo_property_enquiries').select('*, octo_properties(id, title, city_name, address_name, price_display, cover_image)').eq('host_id', user.id).order('created_at', { ascending: false });
       setEnquiries(enquiriesData || []);
 
       const savedFeatures = localStorage.getItem('octo_custom_features');
       if (savedFeatures) setCustomFeatures(JSON.parse(savedFeatures));
+
+      const initialLikes: Record<string, boolean> = {};
+      const initialSaves: Record<string, boolean> = {};
+      const initialLikeCounts: Record<string, number> = {};
+      const initialSaveCounts: Record<string, number> = {};
+
+      fetchedProps.forEach(p => {
+        initialLikeCounts[p.id] = Math.floor(Math.random() * 50) + 5; 
+        initialSaveCounts[p.id] = Math.floor(Math.random() * 20) + 2;
+        initialLikes[p.id] = false; 
+        initialSaves[p.id] = false; 
+      });
+
+      setLikeCounts(initialLikeCounts);
+      setSaveCounts(initialSaveCounts);
+      setUserLikes(initialLikes);
+      setUserSaves(initialSaves);
+
     } catch (error) { 
       console.warn("数据加载失败", error); 
     } 
@@ -187,6 +206,58 @@ export default function MyPropertiesPage() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  // 🌟 新增：彻底删除房源的函数
+  const handleDeleteProperty = async (e: React.MouseEvent, propertyId: string) => {
+    e.stopPropagation(); // 阻止点击跳转
+    
+    // 弹窗二次确认防误触
+    if (!window.confirm("确定要永久下架并删除这个房源吗？删除后所有数据不可恢复。")) return;
+
+    // 乐观更新：先在前端界面把这个房源干掉，让用户立刻看到效果
+    setProperties(prev => prev.filter(p => p.id !== propertyId));
+
+    try {
+      // 真实向 Supabase 数据库发送删除请求
+      const { error } = await supabase
+        .from('octo_properties')
+        .delete()
+        .eq('id', propertyId);
+
+      if (error) throw error;
+      
+    } catch (error: any) {
+      alert("房源删除失败，请稍后重试: " + error.message);
+      // 如果后台删除失败了，重新刷新数据把房源加回来
+      fetchData();
+    }
+  };
+
+  const handleToggleLike = async (e: React.MouseEvent, propertyId: string) => {
+    e.stopPropagation(); 
+    const isCurrentlyLiked = userLikes[propertyId];
+    setUserLikes(prev => ({ ...prev, [propertyId]: !isCurrentlyLiked }));
+    setLikeCounts(prev => ({ ...prev, [propertyId]: prev[propertyId] + (isCurrentlyLiked ? -1 : 1) }));
+    try {
+      // 这里可以放置点赞接口
+    } catch (error) {
+      setUserLikes(prev => ({ ...prev, [propertyId]: isCurrentlyLiked }));
+      setLikeCounts(prev => ({ ...prev, [propertyId]: prev[propertyId] + (isCurrentlyLiked ? 1 : -1) }));
+    }
+  };
+
+  const handleToggleSave = async (e: React.MouseEvent, propertyId: string) => {
+    e.stopPropagation();
+    const isCurrentlySaved = userSaves[propertyId];
+    setUserSaves(prev => ({ ...prev, [propertyId]: !isCurrentlySaved }));
+    setSaveCounts(prev => ({ ...prev, [propertyId]: prev[propertyId] + (isCurrentlySaved ? -1 : 1) }));
+    try {
+      // 这里可以放置收藏接口
+    } catch (error) {
+      setUserSaves(prev => ({ ...prev, [propertyId]: isCurrentlySaved }));
+      setSaveCounts(prev => ({ ...prev, [propertyId]: prev[propertyId] + (isCurrentlySaved ? 1 : -1) }));
+    }
+  };
 
   useEffect(() => {
     if (isPublishModalOpen && mapContainerRef.current && !mapInstanceRef.current) {
@@ -222,7 +293,7 @@ export default function MyPropertiesPage() {
     };
   }, [isPublishModalOpen]);
 
-  const handleGeocode = async (e: React.MouseEvent) => {
+  const handleGeocode = async (e: React.MouseEvent) => { 
     e.preventDefault(); 
     if (!formData.addressName.trim()) { alert("请先输入具体地址哦！"); return; }
     setIsGeocoding(true);
@@ -243,11 +314,9 @@ export default function MyPropertiesPage() {
     } catch (error) { alert("网络错误"); } finally { setIsGeocoding(false); }
   };
 
-  const toggleFeature = (id: string) => {
-    setFormData(prev => ({ ...prev, features: prev.features.includes(id) ? prev.features.filter(f => f !== id) : [...prev.features, id] }));
-  };
+  const toggleFeature = (id: string) => { setFormData(prev => ({ ...prev, features: prev.features.includes(id) ? prev.features.filter(f => f !== id) : [...prev.features, id] })); };
 
-  const handleAddCustomFeature = () => {
+  const handleAddCustomFeature = () => { 
     if (!newFeature.trim()) return;
     const newId = newFeature.trim();
     if (!customFeatures.find(a => a.id === newId) && !baseFeatureOptions.find(a => a.id === newId)) {
@@ -259,7 +328,7 @@ export default function MyPropertiesPage() {
     setNewFeature('');
   };
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => { 
     const files = Array.from(e.target.files || []);
     if (files.length > 0) {
       setFormData(prev => ({
@@ -269,7 +338,7 @@ export default function MyPropertiesPage() {
     e.target.value = ''; 
   };
 
-  const removeNewImage = (index: number) => {
+  const removeNewImage = (index: number) => { 
     setFormData(prev => {
        const newFiles = [...prev.coverImageFiles]; const newPreviews = [...prev.coverImagePreviews];
        newFiles.splice(index, 1); newPreviews.splice(index, 1);
@@ -277,7 +346,7 @@ export default function MyPropertiesPage() {
     });
   };
 
-  const handlePublish = async () => {
+  const handlePublish = async () => { 
     if (!formData.title.trim() || !formData.city.trim()) { alert("请填写城市和标题！"); return; }
     if (formData.saleMethod !== '议价' && formData.saleMethod !== '拍卖' && !formData.priceAmount.trim()) { alert("一口价或询价模式下请填写预估金额！"); return; }
     
@@ -321,21 +390,17 @@ export default function MyPropertiesPage() {
 
       if (insertError) throw insertError;
 
-      // 🌟 修复核心：移除了 posts 表中不存在的 octo_property_id，并加上了强力错误捕获
       if (formData.syncToPost) {
         const postImage = finalImageUrls.length > 0 ? finalImageUrls[0] : `https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=500&q=80&random=${newProperty?.id}`;
-        
         const featureLabels = formData.features.map(f => baseFeatureOptions.find(b => b.id === f)?.label || f);
         const postContent = buildAwesomePropertyContent(formData.title, formData.city, formData.addressName, formData.propertyType, formData.saleMethod, formData.priceAmount, formData.bedrooms, formData.bathrooms, formData.carParks, formData.floorArea, formData.landArea, featureLabels, formData.description);
 
-        // 这里仅插入 author_id, content 和 image_urls
         const { error: postError } = await supabase.from('posts').insert([{
           author_id: user.id,
           content: postContent,
           image_urls: [postImage],
         }]);
 
-        // 🚨 如果失败，直接通过 throw 抛出，在页面 alert 显示
         if (postError) {
           console.error("同步动态报错详情:", postError);
           throw new Error("同步到日常动态失败：" + postError.message);
@@ -343,7 +408,6 @@ export default function MyPropertiesPage() {
       }
 
       setIsPublishModalOpen(false); 
-      // 重置表单，保持 syncToPost 为 true
       setFormData({ city: '', title: '', addressName: '', lat: 0, lng: 0, propertyType: '独立别墅 (House)', bedrooms: 3, bathrooms: 1, carParks: 1, floorArea: '', landArea: '', saleMethod: '一口价', priceAmount: '', priceCurrency: 'NZD', features: [], description: '', imageMode: 'system', coverImageFiles: [], coverImagePreviews: [], syncToPost: true });
       fetchData();                 
     } catch (error: any) { 
@@ -353,7 +417,7 @@ export default function MyPropertiesPage() {
     }
   };
 
-  const handleSendReply = async (enquiryId: string) => {
+  const handleSendReply = async (enquiryId: string) => { 
     const text = replyTexts[enquiryId];
     if (!text?.trim()) return;
 
@@ -371,8 +435,8 @@ export default function MyPropertiesPage() {
   };
 
   const renderPropertyStats = (property: any) => {
-    const views = Math.floor(Math.random() * 500) + 50;
-    const saves = Math.floor(views * 0.1);
+    const likesCount = likeCounts[property.id] || 0;
+    const savesCount = saveCounts[property.id] || 0;
     
     return (
       <div className="flex flex-col justify-center h-full w-full py-1">
@@ -381,12 +445,12 @@ export default function MyPropertiesPage() {
           房源活跃数据
         </div>
         <div className="flex justify-between items-center mb-2">
-           <span className="text-xs text-gray-600 font-medium">累计浏览</span>
-           <span className="text-sm font-black text-gray-900">{views}</span>
+           <span className="text-xs text-gray-600 font-medium">获赞次数</span>
+           <span className="text-sm font-black text-gray-900">{likesCount}</span>
         </div>
         <div className="flex justify-between items-center mb-2">
            <span className="text-xs text-gray-600 font-medium">被收藏(Watchlist)</span>
-           <span className="text-sm font-black text-blue-600">{saves}</span>
+           <span className="text-sm font-black text-blue-600">{savesCount}</span>
         </div>
         <div className="flex justify-between items-center mt-auto pt-2 border-t border-gray-100">
            <span className="text-[10px] text-gray-400">上架状态</span>
@@ -432,7 +496,44 @@ export default function MyPropertiesPage() {
               <div className={viewMode === 'grid' ? "columns-2 gap-3 space-y-3" : "flex flex-col gap-4"}>
                 {properties.map((prop) => (
                   <div key={prop.id} className={`bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-md border border-gray-100 transition-all ${viewMode === 'list' ? 'flex flex-col sm:flex-row p-3 gap-4 items-stretch' : 'flex flex-col'}`}>
-                    <div onClick={() => router.push(`/my-properties/${prop.id}`)} className={`cursor-pointer flex flex-col ${viewMode === 'list' ? "w-full sm:w-56 flex-shrink-0" : "w-full"}`}>
+                    
+                    <div onClick={() => router.push(`/my-properties/${prop.id}`)} className={`cursor-pointer flex flex-col relative ${viewMode === 'list' ? "w-full sm:w-56 flex-shrink-0" : "w-full"}`}>
+                      
+                      {/* 🌟 悬浮操作按钮组 (删除 & 收藏 & 点赞) */}
+                      <div className="absolute top-2 right-2 z-30 flex flex-col gap-2">
+                        
+                        {/* 🌟 新增的红色删除按钮 */}
+                        <button 
+                          onClick={(e) => handleDeleteProperty(e, prop.id)}
+                          className="w-7 h-7 bg-white/70 backdrop-blur-md rounded-full flex items-center justify-center hover:bg-red-50 hover:text-red-600 shadow-sm transition-all text-gray-600"
+                          title="永久删除房源"
+                        >
+                          <svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                          </svg>
+                        </button>
+
+                        {/* 收藏按钮 */}
+                        <button 
+                          onClick={(e) => handleToggleSave(e, prop.id)}
+                          className="w-7 h-7 bg-white/60 backdrop-blur-md rounded-full flex items-center justify-center hover:bg-white shadow-sm transition-all text-gray-900"
+                        >
+                          <svg viewBox="0 0 24 24" fill={userSaves[prop.id] ? "currentColor" : "none"} stroke="currentColor" strokeWidth={userSaves[prop.id] ? "0" : "2.5"} className={`w-4 h-4 ${userSaves[prop.id] ? 'text-blue-500' : 'text-gray-700'}`}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+                          </svg>
+                        </button>
+                        
+                        {/* 点赞按钮 */}
+                        <button 
+                          onClick={(e) => handleToggleLike(e, prop.id)}
+                          className="w-7 h-7 bg-white/60 backdrop-blur-md rounded-full flex items-center justify-center hover:bg-white shadow-sm transition-all text-gray-900"
+                        >
+                          <svg viewBox="0 0 24 24" fill={userLikes[prop.id] ? "currentColor" : "none"} stroke="currentColor" strokeWidth={userLikes[prop.id] ? "0" : "2.5"} className={`w-4 h-4 ${userLikes[prop.id] ? 'text-red-500' : 'text-gray-700'}`}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
+                          </svg>
+                        </button>
+                      </div>
+
                       <PropertyCardSlider images={getDisplayImages(prop)} viewMode={viewMode} city={prop.address_name || prop.city_name} className={viewMode === 'list' ? "w-full h-48 sm:h-36 rounded-xl" : "w-full aspect-[4/3] rounded-t-[12px]"} />
                       <div className={viewMode === 'list' ? "py-2" : "px-4 pt-3 pb-2"}>
                         <div className="flex items-center gap-2 mb-1">
@@ -640,7 +741,6 @@ export default function MyPropertiesPage() {
             </div>
 
             <div className="p-4 border-t border-gray-100 bg-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 rounded-b-[24px]">
-              {/* 🌟 左侧：同步到动态的开关 */}
               <label className="flex items-center gap-2.5 cursor-pointer group w-fit">
                 <div className={`w-5 h-5 rounded flex items-center justify-center transition-colors border shadow-sm ${formData.syncToPost ? 'bg-orange-500 border-orange-500' : 'bg-white border-gray-300 group-hover:border-orange-400'}`}>
                   {formData.syncToPost && <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
@@ -652,7 +752,6 @@ export default function MyPropertiesPage() {
                 <input type="checkbox" className="hidden" checked={formData.syncToPost} onChange={(e) => setFormData({...formData, syncToPost: e.target.checked})} />
               </label>
 
-              {/* 右侧：操作按钮 */}
               <div className="flex items-center gap-3 self-end sm:self-auto">
                 <button onClick={() => setIsPublishModalOpen(false)} className="px-5 py-2 text-sm font-bold text-gray-500 bg-white border border-gray-200 rounded-full hover:bg-gray-100 transition shadow-sm">取消</button>
                 <button onClick={handlePublish} disabled={isPublishing} className="px-6 py-2 text-sm font-bold text-white bg-gray-900 rounded-full hover:bg-black transition shadow-sm disabled:opacity-50">

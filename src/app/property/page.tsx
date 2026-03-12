@@ -32,32 +32,48 @@ export default function PropertyLobbyPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'ALL' | 'AUCTION' | 'MINE'>('ALL');
   
+  // 🌟 点赞和收藏状态管理
+  const [userLikes, setUserLikes] = useState<Record<string, boolean>>({});
+  const [userSaves, setUserSaves] = useState<Record<string, boolean>>({});
+  const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
+  const [saveCounts, setSaveCounts] = useState<Record<string, number>>({});
 
-  // 真实连接 Supabase 数据库拉取房源
-  // 真实连接 Supabase 数据库拉取房源 (带弹窗检测版)
+  // 真实连接 Supabase 数据库拉取房源 
   useEffect(() => {
     const fetchRealProperties = async () => {
       setLoading(true);
       try {
+        const { data: { user } } = await supabase.auth.getUser();
+
+        // 1. 获取所有房源
         const { data, error } = await supabase
           .from('octo_properties')
           .select('*')
           .order('created_at', { ascending: false });
 
-        // 🚨 调试弹窗 1：如果后端报错，直接弹出来！
         if (error) {
           alert("❌ 数据库请求报错：\n" + error.message);
           throw error;
         }
 
-        // 🚨 调试弹窗 2：如果没有报错，但数据是空的，说明被 RLS 权限拦截了！
-        if (!data || data.length === 0) {
-          alert("⚠️ 请求成功了，但查到的数据是 0 条！\n这说明极大概率是 Supabase 的 RLS 权限没放开读取，导致你的账号看不到这套房。");
-        } else {
-          // alert("✅ 成功抓取到了 " + data.length + " 条数据！准备渲染...");
-        }
-
         if (data && data.length > 0) {
+          const initialLikes: Record<string, boolean> = {};
+          const initialSaves: Record<string, boolean> = {};
+          const initialLikeCounts: Record<string, number> = {};
+          const initialSaveCounts: Record<string, number> = {};
+
+          // 2. 如果已登录，拉取该用户真实的"点赞"和"收藏"记录
+          let myLikedPropertyIds: string[] = [];
+          let mySavedPropertyIds: string[] = [];
+          
+          if (user) {
+             const { data: likesData } = await supabase.from('octo_property_likes').select('property_id').eq('user_id', user.id);
+             const { data: savesData } = await supabase.from('octo_property_saves').select('property_id').eq('user_id', user.id);
+             
+             if (likesData) myLikedPropertyIds = likesData.map(l => l.property_id);
+             if (savesData) mySavedPropertyIds = savesData.map(s => s.property_id);
+          }
+
           const formattedData: PropertyListing[] = data.map((item: any) => {
             let uiType: 'AUCTION' | 'NEGOTIATION' | 'FIXED_PRICE' = 'FIXED_PRICE';
             if (item.sale_method === '拍卖') uiType = 'AUCTION';
@@ -72,6 +88,14 @@ export default function PropertyLobbyPage() {
               const urls = item.cover_image.split(',').map((s:string) => s.trim());
               if (urls.length > 0 && urls[0]) coverImg = urls[0];
             }
+
+            // Mock 互动总数（这部分总数可以后续再改写为真实 count，目前为展示效果使用随机占位）
+            initialLikeCounts[item.id] = Math.floor(Math.random() * 50) + 5; 
+            initialSaveCounts[item.id] = Math.floor(Math.random() * 20) + 2;
+            
+            // 🌟 将当前用户的真实状态映射进来
+            initialLikes[item.id] = myLikedPropertyIds.includes(item.id);
+            initialSaves[item.id] = mySavedPropertyIds.includes(item.id);
 
             return {
               id: item.id,
@@ -92,6 +116,10 @@ export default function PropertyLobbyPage() {
             };
           });
           
+          setLikeCounts(initialLikeCounts);
+          setSaveCounts(initialSaveCounts);
+          setUserLikes(initialLikes);
+          setUserSaves(initialSaves);
           setProperties(formattedData);
         }
       } catch (err: any) {
@@ -103,6 +131,72 @@ export default function PropertyLobbyPage() {
 
     fetchRealProperties();
   }, []);
+
+  // 🌟 真实数据库写入：处理点赞逻辑 
+  const handleToggleLike = async (e: React.MouseEvent, propertyId: string) => {
+    e.stopPropagation(); // 阻止卡片点击跳转
+    const isCurrentlyLiked = userLikes[propertyId];
+    
+    // 乐观更新 UI：立马变色
+    setUserLikes(prev => ({ ...prev, [propertyId]: !isCurrentlyLiked }));
+    setLikeCounts(prev => ({ ...prev, [propertyId]: prev[propertyId] + (isCurrentlyLiked ? -1 : 1) }));
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        alert("请先登录！");
+        throw new Error("未登录");
+      }
+
+      if (!isCurrentlyLiked) {
+        // 执行点赞
+        const { error } = await supabase.from('octo_property_likes').insert({ user_id: user.id, property_id: propertyId });
+        if (error) throw error;
+      } else {
+        // 取消点赞
+        const { error } = await supabase.from('octo_property_likes').delete().match({ user_id: user.id, property_id: propertyId });
+        if (error) throw error;
+      }
+    } catch (error) {
+      // 如果报错，状态回滚到点击前
+      setUserLikes(prev => ({ ...prev, [propertyId]: isCurrentlyLiked }));
+      setLikeCounts(prev => ({ ...prev, [propertyId]: prev[propertyId] + (isCurrentlyLiked ? 1 : -1) }));
+      console.error("操作失败", error);
+    }
+  };
+
+  // 🌟 真实数据库写入：处理收藏逻辑 
+  const handleToggleSave = async (e: React.MouseEvent, propertyId: string) => {
+    e.stopPropagation();
+    const isCurrentlySaved = userSaves[propertyId];
+    
+    // 乐观更新 UI：立马变色
+    setUserSaves(prev => ({ ...prev, [propertyId]: !isCurrentlySaved }));
+    setSaveCounts(prev => ({ ...prev, [propertyId]: prev[propertyId] + (isCurrentlySaved ? -1 : 1) }));
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        alert("请先登录！");
+        throw new Error("未登录");
+      }
+
+      if (!isCurrentlySaved) {
+        // 执行收藏
+        const { error } = await supabase.from('octo_property_saves').insert({ user_id: user.id, property_id: propertyId });
+        if (error) throw error;
+      } else {
+        // 取消收藏
+        const { error } = await supabase.from('octo_property_saves').delete().match({ user_id: user.id, property_id: propertyId });
+        if (error) throw error;
+      }
+    } catch (error) {
+      // 如果报错，状态回滚到点击前
+      setUserSaves(prev => ({ ...prev, [propertyId]: isCurrentlySaved }));
+      setSaveCounts(prev => ({ ...prev, [propertyId]: prev[propertyId] + (isCurrentlySaved ? 1 : -1) }));
+      console.error("操作失败", error);
+    }
+  };
 
   const getStatusBadge = (status: PropertyListing['status']) => {
     switch(status) {
@@ -180,20 +274,52 @@ export default function PropertyLobbyPage() {
           properties.map(property => (
             <div 
               key={property.id} 
-              // 注意：点击卡片本身依然是跳转到详情页
               onClick={() => router.push(`/property/${property.id}`)}
-              className="bg-white rounded-[20px] overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer border border-gray-100 group"
+              className="bg-white rounded-[20px] overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer border border-gray-100 group relative"
             >
               {/* 图片区域 */}
               <div className="relative w-full h-56 bg-gray-200 overflow-hidden">
                 <img src={property.coverImage} alt={property.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                
+                {/* 🌟 悬浮操作按钮组 (收藏 & 点赞) */}
+                <div className="absolute top-3 right-3 z-20 flex flex-col gap-2">
+                  {/* 收藏按钮 */}
+                  <button 
+                    onClick={(e) => handleToggleSave(e, property.id)}
+                    className="w-8 h-8 bg-white/70 backdrop-blur-md rounded-full flex items-center justify-center hover:bg-white shadow-sm transition-all group/btn"
+                  >
+                    <svg viewBox="0 0 24 24" fill={userSaves[property.id] ? "currentColor" : "none"} stroke="currentColor" strokeWidth={userSaves[property.id] ? "0" : "2"} className={`w-4 h-4 ${userSaves[property.id] ? 'text-blue-500' : 'text-gray-800'}`}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+                    </svg>
+                  </button>
+                  
+                  {/* 点赞按钮 */}
+                  <button 
+                    onClick={(e) => handleToggleLike(e, property.id)}
+                    className="w-8 h-8 bg-white/70 backdrop-blur-md rounded-full flex items-center justify-center hover:bg-white shadow-sm transition-all group/btn"
+                  >
+                    <svg viewBox="0 0 24 24" fill={userLikes[property.id] ? "currentColor" : "none"} stroke="currentColor" strokeWidth={userLikes[property.id] ? "0" : "2"} className={`w-4 h-4 ${userLikes[property.id] ? 'text-red-500' : 'text-gray-800'}`}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
+                    </svg>
+                  </button>
+                </div>
+
                 <div className="absolute top-3 left-3 flex gap-2">
                   {getStatusBadge(property.status)}
                   {getTypeBadge(property.type)}
                 </div>
-                <div className="absolute bottom-3 left-3 flex items-center gap-1.5 bg-black/50 backdrop-blur-md px-2.5 py-1 rounded-full text-white">
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                  <span className="text-[11px] font-medium">{property.views}</span>
+                
+                {/* 底部互动数据条 */}
+                <div className="absolute bottom-3 left-3 flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full text-white">
+                  <div className="flex items-center gap-1">
+                    <svg className="w-3.5 h-3.5 opacity-80" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                    <span className="text-[11px] font-medium">{property.views}</span>
+                  </div>
+                  <div className="w-px h-3 bg-white/30"></div>
+                  <div className="flex items-center gap-1">
+                     <svg className="w-3 h-3 opacity-80" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                     <span className="text-[11px] font-medium">{likeCounts[property.id]}</span>
+                  </div>
                 </div>
               </div>
 
@@ -232,7 +358,6 @@ export default function PropertyLobbyPage() {
                     <img src={property.authorAvatar} alt="owner" className="w-6 h-6 rounded-full border border-gray-200" />
                     <span className="text-[12px] font-medium text-gray-500">{property.authorName}</span>
                   </div>
-                  {/* 🚨 核心修改点：加入 onClick 并阻止冒泡 */}
                   <button 
                     onClick={(e) => {
                       e.stopPropagation(); // 阻止触发外层卡片的跳转事件
