@@ -1,7 +1,7 @@
 // src/components/PostDetailClient.tsx
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import PostList from '@/components/PostList';
@@ -19,12 +19,27 @@ export default function PostDetailClient({ post, initialComments, postId }: Post
   const [newComment, setNewComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-const { data, mutate } = useSWR(
+  // 🌟 核心修复 1：利用 localStorage 实现0延迟获取 currentUserId
+  const [currentUserId, setCurrentUserId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('octo_room_user_id');
+    return null;
+  });
+
+  useEffect(() => {
+    // 异步兜底，防止 localStorage 被清空
+    supabase.auth.getUser().then(({ data }) => {
+      if (data?.user) {
+        setCurrentUserId(data.user.id);
+        localStorage.setItem('octo_room_user_id', data.user.id);
+      }
+    });
+  }, []);
+
+  const { data, mutate } = useSWR(
     postId ? `post-${postId}` : null,
     async () => {
       const localUserId = typeof window !== 'undefined' ? localStorage.getItem('octo_room_user_id') : null;
 
-      // 🌟 修复：拉取 bookmarks(count)
       const { data: countsData } = await supabase
         .from('posts')
         .select('*, profiles(username, avatar_url), quote_post:quote_post_id(id, content, image_urls, username), likes(count), comments(count), bookmarks(count), reposts(count)')
@@ -42,7 +57,7 @@ const { data, mutate } = useSWR(
       if (localUserId) {
         const [l, m, r, f] = await Promise.all([
           supabase.from('likes').select('post_id').eq('user_id', localUserId).eq('post_id', postId),
-          supabase.from('bookmarks').select('post_id').eq('user_id', localUserId).eq('post_id', postId), // 🌟 修复表名
+          supabase.from('bookmarks').select('post_id').eq('user_id', localUserId).eq('post_id', postId),
           supabase.from('reposts').select('post_id').eq('user_id', localUserId).eq('post_id', postId),
           supabase.from('follows').select('following_id').eq('follower_id', localUserId).eq('following_id', basePost.author_id)
         ]);
@@ -58,7 +73,7 @@ const { data, mutate } = useSWR(
           _interactions: {
             likes: Array.isArray(basePost.likes) ? basePost.likes[0]?.count : (basePost.likes?.count || 0),
             comments: Array.isArray(basePost.comments) ? basePost.comments[0]?.count : (basePost.comments?.count || 0),
-            marks: Array.isArray(basePost.bookmarks) ? basePost.bookmarks[0]?.count : (basePost.bookmarks?.count || 0), // 🌟 修复字段
+            marks: Array.isArray(basePost.bookmarks) ? basePost.bookmarks[0]?.count : (basePost.bookmarks?.count || 0), 
             reposts: Array.isArray(basePost.reposts) ? basePost.reposts[0]?.count : (basePost.reposts?.count || 0),
             likedByMe,
             markedByMe,
@@ -79,12 +94,13 @@ const { data, mutate } = useSWR(
   );
 
   const enrichedPost = data?.enrichedPost || post;
-  const currentUserId = data?.currentUserId || null;
 
-  const fetchComments = async () => {
+  // 🌟 核心修复 2：查询时显式指定 user_id，杜绝查不到的情况
+  const fetchComments = useCallback(async () => {
+    if (!postId) return;
     const { data: commentsData } = await supabase
       .from('comments')
-      .select('*')
+      .select('id, user_id, content, created_at, post_id') 
       .eq('post_id', postId)
       .order('created_at', { ascending: true });
     
@@ -104,7 +120,11 @@ const { data, mutate } = useSWR(
     } else {
       setComments([]);
     }
-  };
+  }, [postId]);
+
+  useEffect(() => {
+    fetchComments();
+  }, [fetchComments]);
 
   const handleSubmitComment = async () => {
     if (!newComment.trim()) return;
@@ -140,6 +160,35 @@ const { data, mutate } = useSWR(
       alert('评论失败: ' + err.message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    const isConfirmed = window.confirm('确定要删除这条评论吗？此操作不可撤销。');
+    if (!isConfirmed) return;
+
+    try {
+      const { error } = await supabase.from('comments').delete().eq('id', commentId);
+      if (error) throw error;
+
+      // 1. 评论列表无缝去除
+      setComments(prev => prev.filter(c => c.id !== commentId));
+      
+      // 2. 主贴评论数字无缝 -1
+      if (data) {
+        mutate({
+          ...data,
+          enrichedPost: {
+            ...data.enrichedPost,
+            _interactions: {
+              ...data.enrichedPost._interactions,
+              comments: Math.max(0, (data.enrichedPost._interactions?.comments || 1) - 1)
+            }
+          }
+        }, false);
+      }
+    } catch (err: any) {
+      alert('删除失败: ' + err.message);
     }
   };
 
@@ -187,27 +236,51 @@ const { data, mutate } = useSWR(
         ) : (
           <div className="space-y-4">
             {comments.map((comment: any) => (
-              <div key={comment.id} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex items-center space-x-2 mb-2">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#FF8C00] to-yellow-400 flex items-center justify-center text-white text-xs font-bold shrink-0 overflow-hidden">
+              <div key={comment.id} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+                
+                {/* 🌟 核心修复 3：全新的评论卡片排版 */}
+                <div className="flex items-start gap-3">
+                  {/* 头像 */}
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#FF8C00] to-yellow-400 flex items-center justify-center text-white text-[15px] font-bold shrink-0 overflow-hidden mt-0.5">
                     {comment.user?.avatar_url ? (
                       <img src={comment.user.avatar_url} className="w-full h-full object-cover" alt="avatar" />
                     ) : (
                       (comment.user?.username || 'U').charAt(0).toUpperCase()
                     )}
                   </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-gray-900">
-                      {comment.user?.username || '未知用户'}
-                    </span>
-                    <span className="text-[10px] text-gray-400 font-medium">
-                      {new Date(comment.created_at).toLocaleString()}
-                    </span>
+                  
+                  {/* 核心内容区 */}
+                  <div className="flex flex-col flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[14px] font-bold text-gray-900 truncate">
+                          {comment.user?.username || '未知用户'}
+                        </span>
+                        
+                        {/* 🌟 直接把红色删除按钮放在名字旁边！绝对不会被隐藏！ */}
+                        {currentUserId === comment.user_id && (
+                          <button
+                            onClick={() => handleDeleteComment(comment.id)}
+                            className="text-[11px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full hover:bg-red-100 transition-colors shrink-0"
+                          >
+                            删除
+                          </button>
+                        )}
+                      </div>
+                      
+                      {/* 时间 */}
+                      <span className="text-[11px] text-gray-400 font-medium shrink-0">
+                        {new Date(comment.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
+
+                    {/* 评论内容 */}
+                    <p className="text-gray-800 text-[14px] mt-1.5 leading-relaxed break-words">
+                      {comment.content}
+                    </p>
                   </div>
                 </div>
-                <p className="text-gray-800 text-sm mt-1 pl-10 leading-relaxed">
-                  {comment.content}
-                </p>
+
               </div>
             ))}
           </div>
