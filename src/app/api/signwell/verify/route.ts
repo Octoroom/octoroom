@@ -25,15 +25,21 @@ export async function POST(request: Request) {
 
     const docData = await swResponse.json();
 
-    // 2. 找到买家 (buyer) 的签署状态
-    const buyer = docData.recipients?.find((r: any) => r.id === 'buyer_id');
+    // 打印一下真实的返回数据，方便咱们在 Vercel 日志里看
+    console.log("🔍 SignWell 查岗数据返回，文档状态:", docData.status);
+
+    // 2. 🌟 核心修复：不用 id 找人，用 placeholder_name 找咱们的买家
+    const buyer = docData.recipients?.find((r: any) => r.placeholder_name === 'buyer');
     
-    // 如果还没签，返回 false
-    if (!buyer || buyer.status !== 'signed') {
+    // 如果没找到买家，或者买家的状态既不是 signed 也不是 completed，说明还没签完
+    if (!buyer || (buyer.status !== 'signed' && buyer.status !== 'completed')) {
+      console.log("⏳ 买家尚未签字，当前状态:", buyer?.status || '未找到买家');
       return NextResponse.json({ signed: false });
     }
 
-    // 3. 🌟 如果已经签了！检查数据库是否已经有记录 (防止重复插入)
+    console.log("✅ 买家已签字！准备写入数据库...");
+
+    // 3. 检查数据库是否已经有记录 (防止买家疯狂点按钮导致重复插入)
     const { data: existingOffer } = await supabaseAdmin
       .from('octo_offers')
       .select('id')
@@ -50,7 +56,7 @@ export async function POST(request: Request) {
         status: 'pending_seller_signature'
       });
       if (error) throw error;
-      console.log(`✅ 主动验证成功！录入买家 [${buyerId}] 的 Offer！`);
+      console.log(`🎉 主动验证成功！录入买家 [${buyerId}] 的 Offer！`);
     }
 
     return NextResponse.json({ signed: true });
