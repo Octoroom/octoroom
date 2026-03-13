@@ -639,7 +639,7 @@ const renderProvidersRoom = () => {
       {/* 底部悬浮行动条 */}
       <div className="fixed bottom-0 left-0 md:left-auto md:w-[640px] w-full p-4 bg-white/90 backdrop-blur-md border-t border-gray-100 shadow-[0_-10px_30px_rgba(0,0,0,0.05)] z-40">
         {activeTab === 'DETAILS' && (
-          <button onClick={() => setActiveTab('WORKFLOW')} className="w-full py-3.5 rounded-xl font-bold text-[15px] bg-orange-500 text-white shadow-lg shadow-orange-500/30 hover:bg-orange-600 transition-colors flex justify-center items-center gap-2">
+          <button onClick={() => router.push(`/contract/${propertyId}`)} className="...">
             发起意向 / 起草合同
             <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
           </button>
