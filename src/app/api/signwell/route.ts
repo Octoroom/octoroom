@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     
     // 🌟 新增：获取动态的网站根域名 (本地是 localhost, 线上是 octoroom.com)
-    const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'https://octoroom.com';
 
     if (!process.env.SIGNWELL_API_KEY) {
        return NextResponse.json({ error: "服务器未能读取到 API Key" }, { status: 500 });
