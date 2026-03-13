@@ -9,10 +9,11 @@ export default function ContractPage() {
   const params = useParams();
   const propertyId = params?.id as string;
 
-  // 增加 step 3：签署完成状态
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [loading, setLoading] = useState(true); // 默认 true，防止页面闪烁
+  const [loading, setLoading] = useState(true);
+  const [verifying, setVerifying] = useState(false); // 新增验证中状态
   const [signUrl, setSignUrl] = useState<string | null>(null);
+  const [documentId, setDocumentId] = useState<string | null>(null); // 保存文档ID
   const [propertyStatus, setPropertyStatus] = useState<string>('loading');
   const [userId, setUserId] = useState<string | null>(null);
   
@@ -21,7 +22,6 @@ export default function ContractPage() {
   ]);
   const [selectedTemplate, setSelectedTemplate] = useState(templates[0].id);
 
-  // 🌟 核心升级 1：页面加载时检查 Offer 记录，并监听新 Offer 插入
   useEffect(() => {
     let channel: any = null;
 
@@ -34,7 +34,6 @@ export default function ContractPage() {
       }
       setUserId(user.id);
 
-      // 1. 获取房源基本状态 (保留用于 Step 1 显示)
       const { data: propData } = await supabase
         .from('octo_properties')
         .select('status')
@@ -42,7 +41,6 @@ export default function ContractPage() {
         .single();
       if (propData) setPropertyStatus(propData.status);
 
-      // 2. 检查当前买家是否已经出过 Offer
       const { data: offer } = await supabase
         .from('octo_offers')
         .select('id, status')
@@ -51,11 +49,10 @@ export default function ContractPage() {
         .single();
         
       if (offer) {
-        setStep(3); // 已经出过价，直接显示成功页
+        setStep(3);
       }
       setLoading(false);
 
-      // 3. 订阅 Supabase Realtime：只监听 octo_offers 表的新增事件
       channel = supabase
         .channel('offer-inserts')
         .on(
@@ -63,8 +60,6 @@ export default function ContractPage() {
           { event: 'INSERT', schema: 'public', table: 'octo_offers', filter: `property_id=eq.${propertyId}` },
           (payload) => {
             console.log('🔥 收到实时数据库更新 (新 Offer):', payload);
-            
-            // 只要确认这条插入的 Offer 是当前登录用户的，瞬间跳到成功页！
             if (payload.new.buyer_id === user.id) {
               setStep(3);
             }
@@ -76,9 +71,49 @@ export default function ContractPage() {
     init();
 
     return () => {
-      if (channel) supabase.removeChannel(channel); // 清理监听器
+      if (channel) supabase.removeChannel(channel);
     };
   }, [propertyId, router]);
+
+  // 🌟 核心新功能：主动验证买家是否签完
+  const handleVerifySignature = async (docIdToVerify: string) => {
+    if (!userId) return;
+    setVerifying(true);
+    try {
+      const response = await fetch('/api/signwell/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId: docIdToVerify, propertyId, buyerId: userId })
+      });
+      const data = await response.json();
+      if (data.signed) {
+        setStep(3); // 验证成功，切换到成功页！
+      } else {
+        alert("系统尚未检测到您的有效签字。如果您刚签完，请稍等几秒再试。");
+      }
+    } catch (error) {
+      console.error("验证失败", error);
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  // 🌟 打开弹窗并开始监听
+  const openSignPopup = (url: string, currentDocId: string) => {
+    const width = 800; const height = 800;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    const signWindow = window.open(url, 'SignWellRoom', `width=${width},height=${height},left=${left},top=${top},toolbar=0,location=0,status=0,menubar=0`);
+
+    // 智能轮询：每秒检查一次弹窗是否被关掉
+    const timer = setInterval(() => {
+      if (signWindow?.closed) {
+        clearInterval(timer);
+        console.log("✅ 检测到弹窗关闭，开始主动验证签名...");
+        handleVerifySignature(currentDocId);
+      }
+    }, 1000);
+  };
 
   const handleGenerateContract = async () => {
     console.log("🚀 开始生成合同流程, 房源ID:", propertyId);
@@ -107,25 +142,19 @@ export default function ContractPage() {
           propertyId: propertyId,
           buyerName: user.user_metadata?.full_name || user.email?.split('@')[0],
           buyerEmail: user.email,
-          buyerId: user.id // 🌟 核心新增：把买家 ID 传给后端用于后续插入 Offer
+          buyerId: user.id
         }),
       });
 
       const data = await response.json();
 
-      if (data.signUrl) {
+      if (data.signUrl && data.documentId) {
         setSignUrl(data.signUrl);
-        setStep(2); // 切换到等待页
+        setDocumentId(data.documentId); // 存下 Document ID
+        setStep(2); 
         
-        const width = 800; const height = 800;
-        const left = window.screenX + (window.outerWidth - width) / 2;
-        const top = window.screenY + (window.outerHeight - height) / 2;
-        
-        window.open(
-          data.signUrl, 
-          'SignWellRoom', 
-          `width=${width},height=${height},left=${left},top=${top},toolbar=0,location=0,status=0,menubar=0`
-        );
+        // 调用我们封装好的弹窗函数
+        openSignPopup(data.signUrl, data.documentId); 
       } else {
         throw new Error(data.error || '生成失败');
       }
@@ -136,7 +165,6 @@ export default function ContractPage() {
     }
   };
 
-  // 渲染加载中状态
   if (loading && step === 1) {
     return <div className="min-h-screen flex items-center justify-center bg-[#F8F9FB]">正在加载签署环境...</div>;
   }
@@ -197,21 +225,26 @@ export default function ContractPage() {
              </div>
              <h2 className="text-3xl font-black text-gray-900 mb-4">正在等待您完成签署</h2>
              <p className="text-gray-500 mb-10 text-lg">
-               请在弹出的加密窗口中完成签字。签署完成后，弹窗将自动关闭，本页面也会同步更新。<br/>
-               <span className="text-sm font-mono text-blue-500">Listening for Realtime inserts...</span>
+               请在弹出的加密窗口中完成签字。如果您已签完并看到绿色的页面，<br/>
+               <span className="font-bold text-black">请直接关闭弹窗</span>，系统将自动核实并更新状态。
              </p>
              <div className="space-y-4 max-w-sm mx-auto">
-                <button onClick={() => {
-                    const width = 800; const height = 800;
-                    const left = window.screenX + (window.outerWidth - width) / 2;
-                    const top = window.screenY + (window.outerHeight - height) / 2;
-                    window.open(signUrl!, 'SignWellRoom', `width=${width},height=${height},left=${left},top=${top},toolbar=0,location=0,status=0,menubar=0`);
-                  }}
-                  className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-blue-700"
+                {/* 🌟 手动验证按钮作为双保险 */}
+                <button 
+                  onClick={() => documentId && handleVerifySignature(documentId)}
+                  disabled={verifying}
+                  className="w-full bg-black text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-gray-800 transition-all active:scale-95"
+                >
+                  {verifying ? '正在联机核实...' : '我已完成签字，点击验证'}
+                </button>
+
+                <button 
+                  onClick={() => openSignPopup(signUrl!, documentId!)} 
+                  className="w-full bg-blue-50 text-blue-600 py-3 rounded-2xl font-bold hover:bg-blue-100 transition-all"
                 >
                   弹窗未弹出？点击重新打开
                 </button>
-                <button onClick={() => setStep(1)} className="block w-full text-gray-400 hover:text-gray-600 font-medium">放弃签署并返回</button>
+                <button onClick={() => setStep(1)} className="block w-full text-gray-400 hover:text-gray-600 font-medium pt-2">放弃签署并返回</button>
              </div>
           </div>
         )}
