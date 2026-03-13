@@ -11,14 +11,14 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     
-    // 🌟 新增：获取动态的网站根域名 (本地是 localhost, 线上是 octoroom.com)
+    // 🌟 获取动态的网站根域名
     const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'https://octoroom.com';
 
     if (!process.env.SIGNWELL_API_KEY) {
        return NextResponse.json({ error: "服务器未能读取到 API Key" }, { status: 500 });
     }
 
-    // 🌟 接收多传过来的 buyerId
+    // 🌟 接收前端传过来的 buyerId
     const { templateId, propertyId, buyerName, buyerEmail, buyerId } = body;
 
     const { data: property, error: pError } = await supabaseAdmin
@@ -40,6 +40,9 @@ export async function POST(request: Request) {
     const sellerEmail = authData.user.email;
     const sellerName = property.author_name || "房东";
 
+    // 构造跳转回我们隐形 API 的 URL
+    const successRedirectUrl = `${origin}/api/signwell/success?property_id=${propertyId}&buyer_id=${buyerId}`;
+
     const payload = {
       test_mode: true,
       template_id: templateId, 
@@ -48,13 +51,23 @@ export async function POST(request: Request) {
       embedded_signing_notifications: true,
       external_id: propertyId,
       
-      // 🌟 核心绝招：让 SignWell 签完字后跳到我们新建的 API
-      // 并把 property_id 和 buyer_id 带过去
-      redirect_url: `${origin}/api/signwell/success?property_id=${propertyId}&buyer_id=${buyerId}`,
+      // ⚠️ 最外层的 redirect_url 已经彻底移除，解决多方签署拦截问题！
 
       recipients: [
-        { id: 'buyer_id', placeholder_name: 'buyer', name: buyerName, email: buyerEmail },
-        { id: 'seller_id', placeholder_name: 'seller', name: sellerName, email: sellerEmail }
+        { 
+          id: 'buyer_id', 
+          placeholder_name: 'buyer', 
+          name: buyerName, 
+          email: buyerEmail,
+          // 🌟 核心绝招：把跳转链接精准绑定在买家身上！
+          redirect_url: successRedirectUrl 
+        },
+        { 
+          id: 'seller_id', 
+          placeholder_name: 'seller', 
+          name: sellerName, 
+          email: sellerEmail 
+        }
       ]
     };
 
