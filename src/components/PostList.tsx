@@ -487,8 +487,12 @@ export default function PostList({ posts, currentUserId, fetching, onDelete }: P
             >
               <div className="flex space-x-3 sm:space-x-4">
                 <Link href={`/user/${post.author_id}`} onClick={(e) => e.stopPropagation()} className="shrink-0">
-                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-tr from-[#FF8C00] to-yellow-400 flex items-center justify-center text-white font-bold text-lg hover:ring-4 hover:ring-orange-100 transition-all">
-                    {(post.username || 'U').charAt(0).toUpperCase()}
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-tr from-[#FF8C00] to-yellow-400 flex items-center justify-center text-white font-bold text-lg hover:ring-4 hover:ring-orange-100 transition-all overflow-hidden">
+                    {post.avatar_url ? (
+                      <img src={post.avatar_url} alt="avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      (post.username || 'U').charAt(0).toUpperCase()
+                    )}
                   </div>
                 </Link>
                 
