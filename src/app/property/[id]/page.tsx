@@ -220,12 +220,18 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab, currentUserRo
     { id: 'step_5', title: '无条件交割日 (Unconditional)', description: '所有购房条件满足，合同正式生效。', role: 'SYSTEM', status: 'PENDING' }
   ];
 
-  // 模拟律师信息
-  const lawyer = {
-    name: 'Jessica Chen',
+  // 真实的律师信息来自于 Offer 记录
+  const lawyer = offer?.buyer_lawyer_id ? {
+    name: offer.buyer_lawyer_name || '代理律师',
     role: '买方过户律师',
-    firm: 'Auckland Legal Partners',
-    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jessica',
+    firm: offer.buyer_lawyer_address || '未提供律所地址',
+    // 这里因为我们的 offer 表没有直接存律师头像，我们可以再次请求 profile 或直接用首字母代替
+    avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${offer.buyer_lawyer_name || 'Lawyer'}`,
+  } : {
+    name: '尚未指派',
+    role: '买方过户律师',
+    firm: '等待买家确认代表律师',
+    avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Pending',
   };
 
   const getRoleBadge = (role: Role) => {
@@ -241,7 +247,7 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab, currentUserRo
     switch(role) {
       case 'BUYER': return buyerAvatar;
       case 'SELLER': return property?.author_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=Seller`;
-      case 'LAWYER': return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jessica';
+      case 'LAWYER': return lawyer.avatar;
       case 'SYSTEM': return 'https://api.dicebear.com/7.x/bottts/svg?seed=System';
       default: return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Default';
     }
