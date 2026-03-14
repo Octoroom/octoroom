@@ -510,14 +510,45 @@ export default function PropertyTradeRoom() {
   }, [propertyId, currentUserId]); 
 
   // 服务商数据
-  const [providers] = useState<ServiceProvider[]>([
-    { id: 'p1', role: 'LAWYER', name: 'Jessica Chen', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jessica', quote: '1,500 + GST', pitch: '专精房产交割，代办 LINZ 产权转移及信托账户(Trust Account)托管。', status: 'PENDING' },
-    { id: 'p2', role: 'INSPECTOR', name: 'John Doe', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=John', quote: 600, pitch: '拥有15年奥克兰北岸持牌屋检经验，提供加急报告。', status: 'PENDING' },
-    { id: 'p3', role: 'BROKER', name: 'Sarah Smith', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sarah', quote: '免费', pitch: '熟悉四大行最新利率，可申请高额返现。', status: 'ACCEPTED' },
-    { id: 'p4', role: 'VALUER', name: 'David Brown', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=David', quote: 850, pitch: '新西兰注册估价师，提供权威银行认可的 Registered Valuation 估值报告。', status: 'PENDING' },
-    { id: 'p5', role: 'PHOTOGRAPHER', name: 'Chloe Wang', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Chloe', quote: 350, pitch: '专业房产摄影，含航拍与高清视频，赠送2D户型图。', status: 'PENDING' },
-    { id: 'p6', role: 'STAGER', name: 'Aura Staging', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Aura', quote: '2,200起 (5周)', pitch: '高端全屋软装布置，提升看房体验，平均帮助房产溢价5%售出。', status: 'PENDING' },
-  ]);
+  const [providers, setProviders] = useState<ServiceProvider[]>([]);
+
+  useEffect(() => {
+    const fetchProviders = async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url, bio, role')
+        .in('role', ['LAWYER', 'INSPECTOR', 'BROKER', 'VALUER', 'PHOTOGRAPHER', 'STAGER']);
+      
+      if (data) {
+        const mapped = data.map((p: any) => {
+          let quote: string | number = '咨询报价';
+          let status = 'PENDING';
+          if (p.role === 'LAWYER') quote = '1,500 + GST';
+          if (p.role === 'INSPECTOR') quote = 600;
+          if (p.role === 'BROKER') { quote = '免费'; status = 'ACCEPTED'; }
+          if (p.role === 'VALUER') quote = 850;
+          if (p.role === 'PHOTOGRAPHER') quote = 350;
+          if (p.role === 'STAGER') quote = '2,200起 (5周)';
+
+          return {
+            id: p.id,
+            role: p.role,
+            name: p.full_name,
+            avatar: p.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${p.full_name}`,
+            quote: quote,
+            pitch: p.bio || '提供专业对口服务。',
+            status: status
+          };
+        });
+        
+        const roleOrder = ['LAWYER', 'INSPECTOR', 'BROKER', 'VALUER', 'PHOTOGRAPHER', 'STAGER'];
+        mapped.sort((a: any, b: any) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
+
+        setProviders(mapped);
+      }
+    };
+    fetchProviders();
+  }, []);
 
   if (isLoading) {
     return (
