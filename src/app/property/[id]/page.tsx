@@ -522,7 +522,7 @@ export default function PropertyTradeRoom() {
       if (data) {
         const mapped = data.map((p: any) => {
           let quote: string | number = '咨询报价';
-          let status = 'PENDING';
+          let status: 'PENDING' | 'ACCEPTED' | 'REJECTED' = 'PENDING';
           if (p.role === 'LAWYER') quote = '1,500 + GST';
           if (p.role === 'INSPECTOR') quote = 600;
           if (p.role === 'BROKER') { quote = '免费'; status = 'ACCEPTED'; }
