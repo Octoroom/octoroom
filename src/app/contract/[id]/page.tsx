@@ -182,8 +182,8 @@ export default function ContractPage() {
             propertyId: propertyId,
             buyerName: finalBuyerName,
             buyerEmail: user.email,
-            buyerId: user.id
-            // Note: Additional terms like price and conditions can be mapped here later when SignWell template tags are set up
+            buyerId: user.id,
+            offerTerms: terms
           }),
         });
 
