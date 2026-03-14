@@ -677,35 +677,40 @@ export default function PropertyTradeRoom() {
           <h3 className="text-lg font-black text-gray-900">服务商入驻大厅</h3>
           <button className="px-4 py-1.5 bg-orange-500 text-white text-sm font-bold rounded-full shadow-md hover:bg-orange-600 transition-colors">我是服务商，提交报价</button>
         </div>
-        <div className="space-y-4">
-          {providers.map(provider => {
-            const roleConfig = getProviderRoleConfig(provider.role);
-            return (
-              <div key={provider.id} className={`p-4 border rounded-xl transition-colors bg-white shadow-sm hover:border-orange-200 ${provider.role === 'LAWYER' ? 'border-emerald-200' : 'border-gray-100'}`}>
-                <div className="flex justify-between items-start mb-3">
-                  <div className="flex items-center gap-3">
-                    <img src={provider.avatar} alt="avatar" className="w-10 h-10 rounded-full border border-gray-100 shadow-sm" />
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-gray-900 text-[15px]">{provider.name}</span>
-                        <span className={`text-[10px] font-black px-2 py-0.5 rounded ${roleConfig.color}`}>
-                          {roleConfig.label}
-                        </span>
+        
+        {providers.length === 0 ? (
+           <div className="py-12 text-center text-gray-400 font-bold">加载服务商网络...</div>
+        ) : (
+          <div className="space-y-4">
+            {providers.map(provider => {
+              const roleConfig = getProviderRoleConfig(provider.role);
+              return (
+                <div key={provider.id} className={`p-4 border rounded-xl transition-colors bg-white shadow-sm hover:border-orange-200 ${provider.role === 'LAWYER' ? 'border-emerald-200' : 'border-gray-100'}`}>
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center gap-3">
+                      <img src={provider.avatar} alt="avatar" className="w-10 h-10 rounded-full border border-gray-100 shadow-sm" />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-gray-900 text-[15px]">{provider.name}</span>
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded ${roleConfig.color}`}>
+                            {roleConfig.label}
+                          </span>
+                        </div>
+                        <div className="text-[12px] text-gray-500 mt-0.5 font-medium">报价: <span className="text-orange-500 font-bold">{provider.quote === '免费' ? provider.quote : `$${provider.quote}`}</span></div>
                       </div>
-                      <div className="text-[12px] text-gray-500 mt-0.5 font-medium">报价: <span className="text-orange-500 font-bold">{provider.quote === '免费' ? provider.quote : `$${provider.quote}`}</span></div>
                     </div>
+                    {provider.status === 'ACCEPTED' ? (
+                      <span className="text-[12px] font-bold text-green-600 bg-green-50 px-2 py-1 rounded border border-green-100">已就绪参与 OA</span>
+                    ) : (
+                      currentUserRole === 'BUYER' && <button className="text-[12px] font-bold text-orange-500 bg-orange-50 hover:bg-orange-100 px-3 py-1.5 rounded-full transition-colors border border-orange-100">邀请进入 OA</button>
+                    )}
                   </div>
-                  {provider.status === 'ACCEPTED' ? (
-                    <span className="text-[12px] font-bold text-green-600 bg-green-50 px-2 py-1 rounded border border-green-100">已就绪参与 OA</span>
-                  ) : (
-                    currentUserRole === 'BUYER' && <button className="text-[12px] font-bold text-orange-500 bg-orange-50 hover:bg-orange-100 px-3 py-1.5 rounded-full transition-colors border border-orange-100">邀请进入 OA</button>
-                  )}
+                  <p className="text-[13px] text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100/80 leading-relaxed">“{provider.pitch}”</p>
                 </div>
-                <p className="text-[13px] text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100/80 leading-relaxed">“{provider.pitch}”</p>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
