@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { supabase } from '@/lib/supabase'; // 引入数据库实例
+import { supabase } from '@/lib/supabase';
 
 // --- 🌟 类型定义 ---
 type Role = 'BUYER' | 'SELLER' | 'LAWYER' | 'SYSTEM';
@@ -64,7 +64,8 @@ function CountdownBadge({ dueDate, status }: { dueDate: string; status: StepStat
 export default function OAFlowPage() {
   const router = useRouter();
   const params = useParams();
-  const offerId = params?.id as string;
+  // 🌟 核心：现在的 ID 是房源 ID
+  const propertyId = params?.id as string;
 
   const [loading, setLoading] = useState(true);
   const [offer, setOffer] = useState<any>(null);
@@ -81,33 +82,50 @@ export default function OAFlowPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push('/login'); return; }
 
-      // 联表查询：拿到 Offer 信息和关联的房子信息
+      if (!propertyId) {
+        console.error("URL 中没有获取到 propertyId");
+        setLoading(false);
+        return;
+      }
+
+      console.log(`🔎 正在尝试获取 OA 数据 | 房源ID: ${propertyId} | 买家ID: ${user.id}`);
+
+      // 联表查询：通过 property_id 和 buyer_id 找到那条 Offer
       const { data, error } = await supabase
         .from('octo_offers')
         .select('*, octo_properties(id, author_name)')
-        .eq('id', offerId)
+        .eq('property_id', propertyId)
+        .eq('buyer_id', user.id)
         .single();
 
-      if (data) setOffer(data);
-      setLoading(false);
+      if (error) {
+        console.error("❌ 查询数据库出错或者没找到数据:", error.message);
+      }
 
-      // 监听房东签字导致的状态变化
-      channel = supabase
-        .channel('oa-status-updates')
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'octo_offers', filter: `id=eq.${offerId}` },
-          (payload) => {
-            console.log('🔥 收到房东操作，OA 节点状态更新:', payload);
-            setOffer((prev: any) => ({ ...prev, status: payload.new.status }));
-          }
-        )
-        .subscribe();
+      if (data) {
+        console.log("✅ 成功拿到 Offer 数据:", data);
+        setOffer(data);
+        
+        // 监听房东签字导致的状态变化，注意这里用的是真实的 offer.id
+        channel = supabase
+          .channel('oa-status-updates')
+          .on(
+            'postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'octo_offers', filter: `id=eq.${data.id}` },
+            (payload) => {
+              console.log('🔥 收到房东操作，OA 节点状态更新:', payload);
+              setOffer((prev: any) => ({ ...prev, status: payload.new.status }));
+            }
+          )
+          .subscribe();
+      }
+      setLoading(false);
     };
 
     fetchOffer();
+
     return () => { if (channel) supabase.removeChannel(channel); };
-  }, [offerId, router]);
+  }, [propertyId, router]);
 
 
   // 🌟 2. 根据真实的数据库状态，动态生成 OA 节点！
@@ -120,14 +138,14 @@ export default function OAFlowPage() {
       description: '买方已完成线上电子签名，Offer 正式生成。',
       role: 'BUYER',
       status: 'COMPLETED',
-      completedAt: offer.created_at // 真实的出价时间
+      completedAt: offer.created_at
     },
     {
       id: 'step_2',
       title: '房东审核并签字确认',
       description: `正在等待房东 ${offer.octo_properties?.author_name || ''} 审核您的出价并完成签名。`,
       role: 'SELLER',
-      status: isAccepted ? 'COMPLETED' : 'IN_PROGRESS', // 如果接受了就变绿，否则转菊花
+      status: isAccepted ? 'COMPLETED' : 'IN_PROGRESS', 
       dueDate: !isAccepted ? tomorrow : undefined
     },
     {
@@ -135,7 +153,7 @@ export default function OAFlowPage() {
       title: '买家支付 10% 定金',
       description: '请将定金打入中介或律师的 Trust Account (信托账户)。',
       role: 'BUYER',
-      status: isAccepted ? 'IN_PROGRESS' : 'PENDING', // 房东签了，这个任务才解锁
+      status: isAccepted ? 'IN_PROGRESS' : 'PENDING', 
       dueDate: isAccepted ? nextWeek : undefined
     },
     {
@@ -171,7 +189,14 @@ export default function OAFlowPage() {
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-400 font-bold">同步加密网络中...</div>;
-  if (!offer) return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-red-400 font-bold">找不到该交易案卷</div>;
+  
+  // 🌟 如果报错找不到，多加一句调试提示
+  if (!offer) return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-red-400 font-bold">
+      <p>找不到该交易案卷</p>
+      <p className="text-xs text-gray-400 mt-2 font-mono">Property ID: {propertyId}</p>
+    </div>
+  );
 
   return (
     <main className="flex-1 max-w-[640px] mx-auto w-full min-h-screen border-x border-gray-100 bg-gray-50 flex flex-col relative">
@@ -217,7 +242,6 @@ export default function OAFlowPage() {
         <div className="relative border-l-2 border-gray-200 ml-3 space-y-8">
           {steps.map((step, index) => (
             <div key={step.id} className="relative pl-6">
-              {/* 时间轴圆点 */}
               <div className={`absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 bg-white flex items-center justify-center
                 ${step.status === 'COMPLETED' ? 'border-green-500 bg-green-500' : 
                   step.status === 'IN_PROGRESS' ? 'border-orange-500 ring-4 ring-orange-100' : 
@@ -228,7 +252,6 @@ export default function OAFlowPage() {
                 )}
               </div>
 
-              {/* 卡片内容 */}
               <div className={`bg-white rounded-[16px] p-4 border transition-all duration-500 ${
                 step.status === 'IN_PROGRESS' ? 'border-orange-200 shadow-lg ring-1 ring-orange-50 scale-[1.02]' : 'border-gray-100 shadow-sm opacity-90'
               }`}>
@@ -245,7 +268,6 @@ export default function OAFlowPage() {
                   {step.description}
                 </p>
 
-                {/* 状态与倒计时显示 */}
                 <div className="flex items-center justify-between mt-2 pt-3 border-t border-gray-50">
                   {step.status === 'COMPLETED' ? (
                     <span className="text-[12px] font-bold text-green-600 flex items-center gap-1">
@@ -261,7 +283,6 @@ export default function OAFlowPage() {
                     </span>
                   )}
 
-                  {/* 行动按钮 */}
                   {step.status === 'IN_PROGRESS' && step.role === 'BUYER' && (
                     <button className="bg-orange-500 text-white px-4 py-1.5 rounded-lg text-[12px] font-bold shadow-md hover:bg-orange-600 active:scale-95 transition-all">
                       去处理 &rarr;
@@ -277,14 +298,12 @@ export default function OAFlowPage() {
         </div>
       </div>
 
-      {/* 底部悬浮操作栏 */}
       <div className="fixed bottom-0 left-0 right-0 max-w-[640px] mx-auto bg-white/90 backdrop-blur-md border-t border-gray-100 p-4 pb-8 z-40">
         <button className="w-full bg-gray-900 text-white font-bold py-3.5 rounded-xl hover:bg-black transition-transform active:scale-[0.98] shadow-lg flex items-center justify-center gap-2">
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
           在交易群内催办
         </button>
       </div>
-
     </main>
   );
 }

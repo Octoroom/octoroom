@@ -11,11 +11,12 @@ export default function ContractPage() {
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [loading, setLoading] = useState(true);
-  const [verifying, setVerifying] = useState(false); // 新增验证中状态
+  const [verifying, setVerifying] = useState(false);
   const [signUrl, setSignUrl] = useState<string | null>(null);
-  const [documentId, setDocumentId] = useState<string | null>(null); // 保存文档ID
+  const [documentId, setDocumentId] = useState<string | null>(null);
   const [propertyStatus, setPropertyStatus] = useState<string>('loading');
   const [userId, setUserId] = useState<string | null>(null);
+  const [offerId, setOfferId] = useState<string | null>(null);
   
   const [templates] = useState([
     { id: '9b6eeb8e-9cf7-4cf2-99e8-34d1c7782f14', title: '新西兰标准房屋买卖协议 (S&P)' },
@@ -49,6 +50,7 @@ export default function ContractPage() {
         .single();
         
       if (offer) {
+        setOfferId(offer.id);
         setStep(3);
       }
       setLoading(false);
@@ -59,8 +61,8 @@ export default function ContractPage() {
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'octo_offers', filter: `property_id=eq.${propertyId}` },
           (payload) => {
-            console.log('🔥 收到实时数据库更新 (新 Offer):', payload);
             if (payload.new.buyer_id === user.id) {
+              setOfferId(payload.new.id);
               setStep(3);
             }
           }
@@ -75,7 +77,6 @@ export default function ContractPage() {
     };
   }, [propertyId, router]);
 
-  // 🌟 核心新功能：主动验证买家是否签完
   const handleVerifySignature = async (docIdToVerify: string) => {
     if (!userId) return;
     setVerifying(true);
@@ -87,7 +88,7 @@ export default function ContractPage() {
       });
       const data = await response.json();
       if (data.signed) {
-        setStep(3); // 验证成功，切换到成功页！
+        setStep(3); 
       } else {
         alert("系统尚未检测到您的有效签字。如果您刚签完，请稍等几秒再试。");
       }
@@ -98,33 +99,25 @@ export default function ContractPage() {
     }
   };
 
-  // 🌟 打开弹窗并开始监听
   const openSignPopup = (url: string, currentDocId: string) => {
     const width = 800; const height = 800;
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
     const signWindow = window.open(url, 'SignWellRoom', `width=${width},height=${height},left=${left},top=${top},toolbar=0,location=0,status=0,menubar=0`);
 
-    // 智能轮询：每秒检查一次弹窗是否被关掉
     const timer = setInterval(() => {
       if (signWindow?.closed) {
         clearInterval(timer);
-        console.log("✅ 检测到弹窗关闭，开始主动验证签名...");
         handleVerifySignature(currentDocId);
       }
     }, 1000);
   };
 
   const handleGenerateContract = async () => {
-    console.log("🚀 开始生成合同流程, 房源ID:", propertyId);
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        alert('请先登录后再进行签署');
-        router.push('/login');
-        return;
-      }
+      if (!user) return;
 
       const { data: property, error: pError } = await supabase
         .from('octo_properties')
@@ -150,10 +143,8 @@ export default function ContractPage() {
 
       if (data.signUrl && data.documentId) {
         setSignUrl(data.signUrl);
-        setDocumentId(data.documentId); // 存下 Document ID
+        setDocumentId(data.documentId); 
         setStep(2); 
-        
-        // 调用我们封装好的弹窗函数
         openSignPopup(data.signUrl, data.documentId); 
       } else {
         throw new Error(data.error || '生成失败');
@@ -172,7 +163,6 @@ export default function ContractPage() {
   return (
     <div className="min-h-screen bg-[#F8F9FB] flex flex-col p-4 md:p-8">
       <div className="max-w-4xl mx-auto w-full flex-1 flex flex-col">
-        {/* Header */}
         <div className="mb-8 flex items-center justify-between shrink-0">
           <div>
             <h1 className="text-3xl font-black text-gray-900 tracking-tight">Octoroom 签署中心</h1>
@@ -189,7 +179,6 @@ export default function ContractPage() {
               <span className="bg-black text-white w-10 h-10 rounded-xl flex items-center justify-center">1</span>
               确认买卖协议条款
             </h2>
-            
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
@@ -201,14 +190,7 @@ export default function ContractPage() {
                   <p className="font-bold text-blue-600 uppercase">{propertyStatus}</p>
                 </div>
               </div>
-
-              <button
-                onClick={handleGenerateContract}
-                disabled={loading}
-                className={`w-full py-5 rounded-2xl font-black text-xl shadow-2xl transition-all ${
-                  loading ? 'bg-gray-200 text-gray-400' : 'bg-black text-white hover:bg-gray-800 active:scale-[0.98]'
-                }`}
-              >
+              <button onClick={handleGenerateContract} disabled={loading} className={`w-full py-5 rounded-2xl font-black text-xl shadow-2xl transition-all ${loading ? 'bg-gray-200 text-gray-400' : 'bg-black text-white hover:bg-gray-800 active:scale-[0.98]'}`}>
                 {loading ? '正在与加密网络建立连接...' : '生成正式合同并开始出价 (Submit Offer)'}
               </button>
             </div>
@@ -229,19 +211,10 @@ export default function ContractPage() {
                <span className="font-bold text-black">请直接关闭弹窗</span>，系统将自动核实并更新状态。
              </p>
              <div className="space-y-4 max-w-sm mx-auto">
-                {/* 🌟 手动验证按钮作为双保险 */}
-                <button 
-                  onClick={() => documentId && handleVerifySignature(documentId)}
-                  disabled={verifying}
-                  className="w-full bg-black text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-gray-800 transition-all active:scale-95"
-                >
+                <button onClick={() => documentId && handleVerifySignature(documentId)} disabled={verifying} className="w-full bg-black text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-gray-800 transition-all active:scale-95">
                   {verifying ? '正在联机核实...' : '我已完成签字，点击验证'}
                 </button>
-
-                <button 
-                  onClick={() => openSignPopup(signUrl!, documentId!)} 
-                  className="w-full bg-blue-50 text-blue-600 py-3 rounded-2xl font-bold hover:bg-blue-100 transition-all"
-                >
+                <button onClick={() => openSignPopup(signUrl!, documentId!)} className="w-full bg-blue-50 text-blue-600 py-3 rounded-2xl font-bold hover:bg-blue-100 transition-all">
                   弹窗未弹出？点击重新打开
                 </button>
                 <button onClick={() => setStep(1)} className="block w-full text-gray-400 hover:text-gray-600 font-medium pt-2">放弃签署并返回</button>
@@ -249,7 +222,6 @@ export default function ContractPage() {
           </div>
         )}
 
-        {/* 🌟 Step 3: 买家出 Offer 成功终极 UI */}
         {step === 3 && (
           <div className="bg-white rounded-[32px] shadow-2xl p-16 text-center border border-blue-100 animate-in zoom-in-95 duration-500 bg-gradient-to-b from-white to-blue-50">
              <div className="w-24 h-24 bg-blue-600 text-white rounded-full flex items-center justify-center mx-auto mb-8 shadow-xl shadow-blue-200">
@@ -260,8 +232,13 @@ export default function ContractPage() {
                您的 S&P 协议签字已完成，我们已自动通知房东进行审核。<br/>
                在房东签字确认前，您可以在工作台随时查看 Offer 进度。
              </p>
-             <button onClick={() => router.push('/')} className="px-8 py-4 bg-black text-white rounded-2xl font-bold text-lg shadow-xl hover:bg-gray-800 transition-all active:scale-95">
-               返回工作台查看进度
+             
+             {/* 🌟 核心修改点：带上 tab 参数，直接跳转回房源室的 OA 面板 */}
+             <button 
+               onClick={() => router.push(`/property/${propertyId}?tab=WORKFLOW`)} 
+               className="px-8 py-4 bg-black text-white rounded-2xl font-bold text-lg shadow-xl hover:bg-gray-800 transition-all active:scale-95"
+             >
+               返回交易室查看 OA 进度
              </button>
           </div>
         )}

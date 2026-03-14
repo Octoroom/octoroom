@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import React from 'react';
 import { supabase } from '@/lib/supabase';
 
@@ -79,9 +79,7 @@ const PropertyMap = ({ lat, lng, address }: { lat: number, lng: number, address:
         const standardMap = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxNativeZoom: 19, maxZoom: 20, attribution: '&copy; OpenStreetMap' });
         const esriSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20, attribution: '&copy; Esri' });
         const linzStyleVector = L.tileLayer('https://tiles-a.data-cdn.linz.govt.nz/services;key=db81bf95b3c447608a8bcf4cb35f50ec/tiles/v4/layer=50772/EPSG:3857/{z}/{x}/{y}.png', { maxZoom: 20, attribution: '&copy; LINZ CC BY 4.0' });
-        const aucklandFloodLayer = L.tileLayer.wms('https://geomapspublic.aucklandcouncil.govt.nz/arcgis/services/Environment/Hazardous_areas/MapServer/WMSServer', { layers: '0,1,2,3', format: 'image/png32', transparent: true, version: '1.3.0', attribution: '&copy; Auckland Council' });
-        const aucklandPipesLayer = L.tileLayer.wms('https://geomapspublic.aucklandcouncil.govt.nz/arcgis/services/Water/Water_Infrastructure/MapServer/WMSServer', { layers: '0,1,2,3,4', format: 'image/png32', transparent: true, version: '1.3.0', attribution: '&copy; Auckland Council' });
-
+        
         delete (L.Icon.Default.prototype as any)._getIconUrl;
         L.Icon.Default.mergeOptions({
           iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -95,7 +93,7 @@ const PropertyMap = ({ lat, lng, address }: { lat: number, lng: number, address:
 
         L.control.layers(
           { "🗺️ 普通街道图 (Standard)": standardMap, "🛰️ 高清卫星图 (Satellite)": esriSatellite }, 
-          { "📐 LINZ 产权边界线": linzStyleVector, "🌊 洪水 / 积水区 (Flood)": aucklandFloodLayer, "🚰 地下管网 (雨水/污水)": aucklandPipesLayer }
+          { "📐 LINZ 产权边界线": linzStyleVector }
         ).addTo(map);
 
         mapInstance.current = map;
@@ -124,18 +122,202 @@ const PropertyMap = ({ lat, lng, address }: { lat: number, lng: number, address:
 
 
 // ==========================================
+// 🌟 核心：基于真实数据的 OA 流业务组件
+// ==========================================
+const WorkflowTimelineTab = ({ propertyId, property, setActiveTab }: { propertyId: string, property: any, setActiveTab: (tab: any) => void }) => {
+  const [loading, setLoading] = useState(true);
+  const [offer, setOffer] = useState<any>(null);
+
+  // 用于倒计时的演示基准时间
+  const tomorrow = new Date(Date.now() + 86400000).toISOString();
+  const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString();
+
+  useEffect(() => {
+    let channel: any = null;
+    
+    const fetchOffer = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('octo_offers')
+        .select('*')
+        .eq('property_id', propertyId)
+        .eq('buyer_id', user.id)
+        .single();
+
+      if (data) {
+        setOffer(data);
+        // 开启实时监听，当房东确认时状态瞬间更新
+        channel = supabase
+          .channel('oa-status-updates')
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'octo_offers', filter: `id=eq.${data.id}` },
+            (payload) => setOffer((prev: any) => ({ ...prev, status: payload.new.status }))
+          ).subscribe();
+      }
+      setLoading(false);
+    };
+
+    fetchOffer();
+    return () => { if (channel) supabase.removeChannel(channel); };
+  }, [propertyId]);
+
+  if (loading) return <div className="py-20 text-center text-gray-400 font-bold">同步加密网络中...</div>;
+  
+  // 🌟 空状态：如果没查到 Offer，提示买家去签合同
+  if (!offer) return (
+    <div className="py-24 text-center flex flex-col items-center animate-in fade-in zoom-in-95">
+      <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-6 shadow-sm border border-gray-100">
+        <svg className="w-10 h-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+      </div>
+      <h3 className="text-xl font-black text-gray-900 mb-2">暂无交易数据</h3>
+      <p className="text-[15px] text-gray-500 mb-8 max-w-[260px] leading-relaxed">您尚未对该房源发起意向，起草并签署合同后即可解锁控制台。</p>
+    </div>
+  );
+
+  // 根据真实的数据库状态判定进度
+  const isAccepted = offer.status === 'accepted' || offer.status === 'sold';
+
+  // 🌟 动态构建步骤数组 (这里就是真实业务逻辑！)
+  const oaSteps: OAStep[] = [
+    { id: 'step_1', title: '买家签署 S&P 购房协议', description: '买方已完成线上电子签名，Offer 正式生成。', role: 'SYSTEM', status: 'COMPLETED', completedAt: offer.created_at },
+    { id: 'step_2', title: '房东审核出价并签字确认', description: `正在等待房东 ${property?.author_name || ''} 审核您的出价并完成签名。`, role: 'SELLER', status: isAccepted ? 'COMPLETED' : 'IN_PROGRESS', dueDate: !isAccepted ? tomorrow : undefined },
+    { id: 'step_3', title: '买家支付 10% 定金', description: '请将定金打入中介或律师的 Trust Account (信托账户)。', role: 'BUYER', status: isAccepted ? 'IN_PROGRESS' : 'PENDING', dueDate: isAccepted ? tomorrow : undefined },
+    { id: 'step_4', title: '律师审查 Title & LIM 报告', description: '买方律师需确认房屋产权无瑕疵，并审查政府档案。', role: 'LAWYER', status: 'PENDING', dueDate: nextWeek },
+    { id: 'step_5', title: '无条件交割日 (Unconditional)', description: '所有购房条件满足，合同正式生效。', role: 'SYSTEM', status: 'PENDING' }
+  ];
+
+  // 模拟律师信息 (未来可以从服务商表里联表查出)
+  const lawyer = {
+    name: 'Jessica Chen',
+    role: '买方过户律师',
+    firm: 'Auckland Legal Partners',
+    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jessica',
+  };
+
+  const getRoleBadge = (role: Role) => {
+    switch(role) {
+      case 'BUYER': return <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-black">买家任务</span>;
+      case 'SELLER': return <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[10px] font-black">卖家任务</span>;
+      case 'LAWYER': return <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-black">律师跟进</span>;
+      case 'SYSTEM': return <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded text-[10px] font-black">系统节点</span>;
+    }
+  };
+
+  const getRoleAvatar = (role: Role) => {
+    switch(role) {
+      case 'BUYER': return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix';
+      case 'SELLER': return property?.author_avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Seller';
+      case 'LAWYER': return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jessica';
+      case 'SYSTEM': return 'https://api.dicebear.com/7.x/bottts/svg?seed=System';
+      default: return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Default';
+    }
+  };
+
+  return (
+    <div className="animate-in fade-in duration-300">
+      
+      {/* 🌟 “我的法律代表” 卡片完美植入 */}
+      <div className="bg-white rounded-[16px] p-4 border border-gray-200 shadow-sm mb-8">
+        <div className="flex justify-between items-center mb-1">
+          <h2 className="text-[13px] font-black text-gray-900">我的法律代表</h2>
+          <button className="text-[12px] text-orange-500 font-bold hover:underline">更换律师</button>
+        </div>
+        <div className="flex items-center gap-3 mt-3">
+          <img src={lawyer.avatar} alt="Lawyer" className="w-12 h-12 rounded-full border border-gray-100 bg-gray-50" />
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[15px] font-bold text-gray-900">{lawyer.name}</span>
+              <span className="bg-emerald-50 text-emerald-600 border border-emerald-100 px-1.5 py-0.5 rounded text-[10px] font-bold">已就绪</span>
+            </div>
+            <p className="text-[12px] text-gray-500 mt-0.5">{lawyer.firm}</p>
+          </div>
+          <button className="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center hover:bg-gray-100 transition-colors">
+            <svg className="w-4 h-4 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+          </button>
+        </div>
+      </div>
+
+      {/* 🌟 交易流时间轴 */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <h3 className="text-lg font-black text-gray-900 mb-6">交易流追踪 (OA)</h3>
+        
+        <div className="relative border-l-2 border-gray-100 ml-5 space-y-8">
+          {oaSteps.map((step) => (
+            <div key={step.id} className="relative pl-8">
+              
+              {/* 头像圆点 */}
+              <div className={`absolute -left-[21px] top-0 w-10 h-10 rounded-full border-4 bg-white flex items-center justify-center z-10 overflow-hidden transition-all ${
+                step.status === 'COMPLETED' ? 'border-green-500' : 
+                step.status === 'IN_PROGRESS' ? 'border-orange-500 shadow-[0_0_0_4px_rgba(249,115,22,0.1)]' : 
+                'border-gray-200 opacity-60'
+              }`}>
+                <img src={getRoleAvatar(step.role)} alt={step.role} className="w-full h-full object-cover bg-gray-50" />
+                
+                {step.status === 'COMPLETED' && (
+                  <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center backdrop-blur-[1px]">
+                     <svg className="w-5 h-5 text-green-600 drop-shadow-md" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7" /></svg>
+                  </div>
+                )}
+              </div>
+
+              {/* 状态卡片 */}
+              <div className={`bg-white rounded-[16px] p-4 border transition-all ${step.status === 'IN_PROGRESS' ? 'border-orange-200 shadow-md ring-1 ring-orange-50' : 'border-gray-100 shadow-sm opacity-90'}`}>
+                <div className="flex flex-col gap-1.5 mb-2">
+                  {getRoleBadge(step.role)}
+                  <h3 className={`text-[15px] font-black ${step.status === 'PENDING' ? 'text-gray-500' : 'text-gray-900'}`}>{step.title}</h3>
+                </div>
+                <p className="text-[13px] text-gray-500 leading-relaxed mb-3">{step.description}</p>
+                
+                <div className="flex items-center justify-between mt-2 pt-3 border-t border-gray-50">
+                  {step.status === 'COMPLETED' ? (
+                    <span className="text-[12px] font-bold text-green-600 flex items-center gap-1">完成于 {new Date(step.completedAt!).toLocaleDateString()}</span>
+                  ) : step.dueDate ? (
+                    <CountdownBadge dueDate={step.dueDate} status={step.status} />
+                  ) : (
+                    <span className="text-[12px] font-medium text-gray-400 flex items-center gap-1">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                      等待前置任务解锁
+                    </span>
+                  )}
+                  
+                  {step.status === 'IN_PROGRESS' && step.role === 'BUYER' && (
+                    <button onClick={() => step.title.includes('律师') ? setActiveTab('PROVIDERS') : alert('跳转至支付网关...')} className="bg-orange-500 text-white px-4 py-1.5 rounded-lg text-[12px] font-bold hover:bg-orange-600 transition-colors shadow-sm shadow-orange-200">
+                      {step.title.includes('律师') ? '去大厅选律师 →' : '去处理 →'}
+                    </button>
+                  )}
+                  {step.status === 'IN_PROGRESS' && step.role === 'SELLER' && (
+                    <span className="text-[12px] font-bold text-orange-500 animate-pulse bg-orange-50 px-2 py-1 rounded">正在等待对方处理...</span>
+                  )}
+                </div>
+              </div>
+
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+// ==========================================
 // 🌟 主组件：交易室页面
 // ==========================================
 export default function PropertyTradeRoom() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams(); // 🌟 引入查询参数 hook
   const propertyId = params?.id as string;
   const currentUserRole = 'BUYER'; 
   
   const [property, setProperty] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const [activeTab, setActiveTab] = useState<'DETAILS' | 'WORKFLOW' | 'PROVIDERS'>('DETAILS');
+  // 🌟 根据 URL 参数动态设置默认 Tab
+  const defaultTab = (searchParams?.get('tab') as 'DETAILS' | 'WORKFLOW' | 'PROVIDERS') || 'DETAILS';
+  const [activeTab, setActiveTab] = useState<'DETAILS' | 'WORKFLOW' | 'PROVIDERS'>(defaultTab);
+
   const [currentImgIndex, setCurrentImgIndex] = useState(0);
 
   // --- 🌟 点赞和收藏相关状态 ---
@@ -143,7 +325,6 @@ export default function PropertyTradeRoom() {
   const [isSaved, setIsSaved] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-  // 1. 初始化时获取当前登录用户
   useEffect(() => {
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -154,64 +335,38 @@ export default function PropertyTradeRoom() {
     getUser();
   }, []);
   
-  // 2. 处理点赞同步逻辑 (乐观更新) - ✅ 修正表名为 octo_property_likes
   const handleToggleLike = async () => {
-    if (!currentUserId) {
-      alert('请先登录后再进行点赞操作！');
-      return;
-    }
-
+    if (!currentUserId) { alert('请先登录后再进行点赞操作！'); return; }
     const previousState = isLiked;
-    setIsLiked(!isLiked); // 瞬间改变 UI
-
+    setIsLiked(!isLiked); 
     try {
       if (previousState) {
-        // 原来是点赞的，现在取消
-        const { error } = await supabase
-          .from('octo_property_likes')
-          .delete()
-          .match({ property_id: propertyId, user_id: currentUserId });
+        const { error } = await supabase.from('octo_property_likes').delete().match({ property_id: propertyId, user_id: currentUserId });
         if (error) throw error;
       } else {
-        // 原来没点赞，现在新增
-        const { error } = await supabase
-          .from('octo_property_likes')
-          .insert({ property_id: propertyId, user_id: currentUserId });
+        const { error } = await supabase.from('octo_property_likes').insert({ property_id: propertyId, user_id: currentUserId });
         if (error) throw error;
       }
     } catch (error: any) {
-      console.error("点赞同步失败:", error.message);
-      setIsLiked(previousState); // 失败则回滚 UI
+      setIsLiked(previousState); 
       alert('网络开小差了，点赞失败');
     }
   };
 
-  // 3. 处理收藏同步逻辑 (乐观更新) - ✅ 修正表名为 octo_property_saves
   const handleToggleSave = async () => {
-    if (!currentUserId) {
-      alert('请先登录后再收藏房源！');
-      return;
-    }
-
+    if (!currentUserId) { alert('请先登录后再收藏房源！'); return; }
     const previousState = isSaved;
-    setIsSaved(!isSaved); // 瞬间改变 UI
-
+    setIsSaved(!isSaved); 
     try {
       if (previousState) {
-        const { error } = await supabase
-          .from('octo_property_saves')
-          .delete()
-          .match({ property_id: propertyId, user_id: currentUserId });
+        const { error } = await supabase.from('octo_property_saves').delete().match({ property_id: propertyId, user_id: currentUserId });
         if (error) throw error;
       } else {
-        const { error } = await supabase
-          .from('octo_property_saves')
-          .insert({ property_id: propertyId, user_id: currentUserId });
+        const { error } = await supabase.from('octo_property_saves').insert({ property_id: propertyId, user_id: currentUserId });
         if (error) throw error;
       }
     } catch (error: any) {
-      console.error("收藏同步失败:", error.message);
-      setIsSaved(previousState); // 失败则回滚 UI
+      setIsSaved(previousState); 
       alert('网络开小差了，收藏失败');
     }
   };
@@ -223,7 +378,6 @@ export default function PropertyTradeRoom() {
       try {
         if (!propertyId) return;
 
-        // 获取房源详情
         const { data: item, error } = await supabase
           .from('octo_properties')
           .select('*')
@@ -231,8 +385,6 @@ export default function PropertyTradeRoom() {
           .single();
 
         if (error) {
-          alert(`🚨 查询失败！\n\n房源ID: ${propertyId}\n错误原因: ${error.message}`);
-          console.error("查询失败:", error.message);
           setProperty(null);
           return;
         }
@@ -283,29 +435,14 @@ export default function PropertyTradeRoom() {
           });
         }
 
-        // --- 查询当前用户的点赞与收藏状态 (✅ 修正为 octo_ 表名) ---
         if (currentUserId && propertyId) {
-          // 查点赞
-          const { data: likeData } = await supabase
-            .from('octo_property_likes')
-            .select('id')
-            .eq('property_id', propertyId)
-            .eq('user_id', currentUserId)
-            .maybeSingle();
+          const { data: likeData } = await supabase.from('octo_property_likes').select('id').eq('property_id', propertyId).eq('user_id', currentUserId).maybeSingle();
           if (likeData) setIsLiked(true);
 
-          // 查收藏
-          const { data: saveData } = await supabase
-            .from('octo_property_saves')
-            .select('id')
-            .eq('property_id', propertyId)
-            .eq('user_id', currentUserId)
-            .maybeSingle();
+          const { data: saveData } = await supabase.from('octo_property_saves').select('id').eq('property_id', propertyId).eq('user_id', currentUserId).maybeSingle();
           if (saveData) setIsSaved(true);
         }
-
       } catch (err: any) {
-        console.error("发生错误:", err);
         setProperty(null);
       } finally {
         setIsLoading(false);
@@ -314,17 +451,6 @@ export default function PropertyTradeRoom() {
 
     fetchProperty();
   }, [propertyId, currentUserId]); 
-
-  // OA 数据
-  const tomorrow = new Date(Date.now() + 86400000).toISOString();
-  const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString();
-  const [oaSteps] = useState<OAStep[]>([
-    { id: 'step_1', title: '签署 S&P 购房协议', description: '买卖双方已完成线上电子签名。', role: 'SYSTEM', status: 'COMPLETED', completedAt: '2026-03-08T10:00:00Z' },
-    { id: 'step_2', title: '买家支付 10% 定金', description: '请将定金打入中介或律师的 Trust Account (信托账户)。', role: 'BUYER', status: 'IN_PROGRESS', dueDate: tomorrow },
-    { id: 'step_3', title: '律师审查 Title & LIM 报告', description: '买方律师需确认房屋产权无瑕疵，并审查政府档案。', role: 'LAWYER', status: 'PENDING', dueDate: nextWeek },
-    { id: 'step_4', title: '无条件交割日 (Unconditional)', description: '所有购房条件满足，合同正式生效。', role: 'SYSTEM', status: 'PENDING' },
-    { id: 'step_5', title: '房屋交割 (Settlement)', description: '尾款结清，律师完成 LINZ 产权转移。', role: 'SYSTEM', status: 'PENDING' }
-  ]);
 
   // 服务商数据
   const [providers] = useState<ServiceProvider[]>([
@@ -336,7 +462,6 @@ export default function PropertyTradeRoom() {
     { id: 'p6', role: 'STAGER', name: 'Aura Staging', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Aura', quote: '2,200起 (5周)', pitch: '高端全屋软装布置，提升看房体验，平均帮助房产溢价5%售出。', status: 'PENDING' },
   ]);
 
-  // 渲染 Loading 状态
   if (isLoading) {
     return (
       <div className="flex-1 max-w-[640px] w-full min-h-screen bg-gray-50 flex items-center justify-center">
@@ -345,7 +470,6 @@ export default function PropertyTradeRoom() {
     );
   }
 
-  // 渲染 404 状态
   if (!property) {
     return (
       <div className="flex-1 max-w-[640px] w-full min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6 text-center">
@@ -358,7 +482,6 @@ export default function PropertyTradeRoom() {
 
   const validAmenities = property.amenities ? property.amenities.split(',').map((s:string) => s.trim()).filter(Boolean) : [];
 
-  // --- 🎨 UI 组件：房源图文详情 ---
   const renderDetailsTab = () => {
     return (
       <div className="animate-in fade-in duration-300">
@@ -447,80 +570,7 @@ export default function PropertyTradeRoom() {
     );
   };
 
-  const renderWorkflowTimeline = () => {
-    const getRoleBadge = (role: Role) => {
-      switch(role) {
-        case 'BUYER': return <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-black">买家任务</span>;
-        case 'SELLER': return <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[10px] font-black">卖家任务</span>;
-        case 'LAWYER': return <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-black">律师跟进</span>;
-        case 'SYSTEM': return <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded text-[10px] font-black">系统节点</span>;
-      }
-    };
-
-    const getRoleAvatar = (role: Role) => {
-      switch(role) {
-        case 'BUYER': return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix';
-        case 'SELLER': return property.author_avatar;
-        case 'LAWYER': return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jessica';
-        case 'SYSTEM': return 'https://api.dicebear.com/7.x/bottts/svg?seed=System';
-        default: return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Default';
-      }
-    };
-
-    return (
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in duration-300">
-        <h3 className="text-lg font-black text-gray-900 mb-6">交易流追踪 (OA)</h3>
-        
-        <div className="relative border-l-2 border-gray-100 ml-5 space-y-8">
-          {oaSteps.map((step) => (
-            <div key={step.id} className="relative pl-8">
-              
-              <div className={`absolute -left-[21px] top-0 w-10 h-10 rounded-full border-4 bg-white flex items-center justify-center z-10 overflow-hidden transition-all ${
-                step.status === 'COMPLETED' ? 'border-green-500' : 
-                step.status === 'IN_PROGRESS' ? 'border-orange-500 shadow-[0_0_0_4px_rgba(249,115,22,0.1)]' : 
-                'border-gray-200 opacity-60'
-              }`}>
-                <img src={getRoleAvatar(step.role)} alt={step.role} className="w-full h-full object-cover bg-gray-50" />
-                
-                {step.status === 'COMPLETED' && (
-                  <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center backdrop-blur-[1px]">
-                     <svg className="w-5 h-5 text-green-600 drop-shadow-md" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7" /></svg>
-                  </div>
-                )}
-              </div>
-
-              <div className={`bg-white rounded-[16px] p-4 border transition-all ${step.status === 'IN_PROGRESS' ? 'border-orange-200 shadow-md ring-1 ring-orange-50' : 'border-gray-100 shadow-sm opacity-90'}`}>
-                <div className="flex flex-col gap-1.5 mb-2">
-                  {getRoleBadge(step.role)}
-                  <h3 className={`text-[15px] font-black ${step.status === 'PENDING' ? 'text-gray-500' : 'text-gray-900'}`}>{step.title}</h3>
-                </div>
-                <p className="text-[13px] text-gray-500 leading-relaxed mb-3">{step.description}</p>
-                
-                <div className="flex items-center justify-between mt-2 pt-3 border-t border-gray-50">
-                  {step.status === 'COMPLETED' ? (
-                    <span className="text-[12px] font-bold text-green-600 flex items-center gap-1">完成于 {new Date(step.completedAt!).toLocaleDateString()}</span>
-                  ) : step.dueDate ? (
-                    <CountdownBadge dueDate={step.dueDate} status={step.status} />
-                  ) : (
-                    <span className="text-[12px] font-medium text-gray-400">等待前置任务完成</span>
-                  )}
-                  
-                  {step.status === 'IN_PROGRESS' && step.role === 'BUYER' && (
-                    <button onClick={() => step.title.includes('律师') ? setActiveTab('PROVIDERS') : alert('去处理')} className="bg-orange-500 text-white px-4 py-1.5 rounded-lg text-[12px] font-bold hover:bg-orange-600 transition-colors">
-                      {step.title.includes('律师') ? '去大厅选律师 →' : '去处理 →'}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-const renderProvidersRoom = () => {
+  const renderProvidersRoom = () => {
     const getProviderRoleConfig = (role: string) => {
       switch(role) {
         case 'LAWYER': return { label: '过户律师', color: 'bg-emerald-100 text-emerald-700' };
@@ -542,7 +592,6 @@ const renderProvidersRoom = () => {
         <div className="space-y-4">
           {providers.map(provider => {
             const roleConfig = getProviderRoleConfig(provider.role);
-            
             return (
               <div key={provider.id} className={`p-4 border rounded-xl transition-colors bg-white shadow-sm hover:border-orange-200 ${provider.role === 'LAWYER' ? 'border-emerald-200' : 'border-gray-100'}`}>
                 <div className="flex justify-between items-start mb-3">
@@ -588,7 +637,6 @@ const renderProvidersRoom = () => {
           </div>
           
           <div className="flex items-center gap-2">
-            {/* 收藏按钮 */}
             <button 
               onClick={handleToggleSave}
               className={`shrink-0 p-2 rounded-full transition-colors ${isSaved ? 'bg-orange-50 text-orange-500' : 'bg-gray-50 text-gray-400 hover:text-orange-500 hover:bg-orange-50'}`}
@@ -597,8 +645,6 @@ const renderProvidersRoom = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
               </svg>
             </button>
-
-            {/* 点赞按钮 */}
             <button 
               onClick={handleToggleLike}
               className={`shrink-0 p-2 rounded-full transition-colors ${isLiked ? 'bg-red-50 text-red-500' : 'bg-gray-50 text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
@@ -632,14 +678,26 @@ const renderProvidersRoom = () => {
       {/* 内容区域 */}
       <div className="p-4 md:p-5 flex-1 bg-white md:bg-transparent">
         {activeTab === 'DETAILS' && renderDetailsTab()}
-        {activeTab === 'WORKFLOW' && renderWorkflowTimeline()}
+        
+        {/* 🌟 在这里将原来写死的 timeline，替换成了独立封装、完全绑定真实业务的全新组件！ */}
+        {activeTab === 'WORKFLOW' && (
+          <WorkflowTimelineTab 
+            propertyId={propertyId} 
+            property={property} 
+            setActiveTab={setActiveTab} 
+          />
+        )}
+        
         {activeTab === 'PROVIDERS' && renderProvidersRoom()}
       </div>
       
       {/* 底部悬浮行动条 */}
       <div className="fixed bottom-0 left-0 md:left-auto md:w-[640px] w-full p-4 bg-white/90 backdrop-blur-md border-t border-gray-100 shadow-[0_-10px_30px_rgba(0,0,0,0.05)] z-40">
         {activeTab === 'DETAILS' && (
-          <button onClick={() => router.push(`/contract/${propertyId}`)} className="...">
+          <button 
+            onClick={() => router.push(`/contract/${propertyId}`)} 
+            className="w-full py-3.5 rounded-xl font-bold text-[15px] bg-orange-500 text-white shadow-lg shadow-orange-500/30 hover:bg-orange-600 transition-colors flex justify-center items-center gap-2"
+          >
             发起意向 / 起草合同
             <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
           </button>
