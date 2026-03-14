@@ -514,39 +514,49 @@ export default function PropertyTradeRoom() {
 
   useEffect(() => {
     const fetchProviders = async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name, avatar_url, bio, role')
-        .in('role', ['LAWYER', 'INSPECTOR', 'BROKER', 'VALUER', 'PHOTOGRAPHER', 'STAGER']);
-      
-      if (data) {
-        const mapped = data.map((p: any) => {
-          let quote: string | number = '咨询报价';
-          let status: 'PENDING' | 'ACCEPTED' | 'REJECTED' = 'PENDING';
-          if (p.role === 'LAWYER') quote = '1,500 + GST';
-          if (p.role === 'INSPECTOR') quote = 600;
-          if (p.role === 'BROKER') { quote = '免费'; status = 'ACCEPTED'; }
-          if (p.role === 'VALUER') quote = 850;
-          if (p.role === 'PHOTOGRAPHER') quote = 350;
-          if (p.role === 'STAGER') quote = '2,200起 (5周)';
-
-          return {
-            id: p.id,
-            role: p.role,
-            name: p.full_name,
-            avatar: p.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${p.full_name}`,
-            quote: quote,
-            pitch: p.bio || '提供专业对口服务。',
-            status: status
-          };
-        });
+      try {
+        const response = await fetch('/api/test-fetch');
+        const { data: rawData, mapped: profiles } = await response.json();
         
-        const roleOrder = ['LAWYER', 'INSPECTOR', 'BROKER', 'VALUER', 'PHOTOGRAPHER', 'STAGER'];
-        mapped.sort((a: any, b: any) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
+        if (profiles && profiles.length > 0) {
+          // 过滤我们需要的角色
+          const allowedRoles = ['LAWYER', 'INSPECTOR', 'BROKER', 'VALUER', 'PHOTOGRAPHER', 'STAGER'];
+          const filtered = profiles.filter((p: any) => allowedRoles.includes(p.role));
+      
+          const mapped = filtered.map((p: any) => {
+            // we need to find the raw data to get bio and avatar
+            const raw = rawData?.find((r: any) => r.id === p.id) || {};
 
-        setProviders(mapped);
+            let quote: string | number = '咨询报价';
+            let status: 'PENDING' | 'ACCEPTED' | 'REJECTED' = 'PENDING';
+            if (p.role === 'LAWYER') quote = '1,500 + GST';
+            if (p.role === 'INSPECTOR') quote = 600;
+            if (p.role === 'BROKER') { quote = '免费'; status = 'ACCEPTED'; }
+            if (p.role === 'VALUER') quote = 850;
+            if (p.role === 'PHOTOGRAPHER') quote = 350;
+            if (p.role === 'STAGER') quote = '2,200起 (5周)';
+
+            return {
+              id: p.id,
+              role: p.role,
+              name: p.name,
+              avatar: raw.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${p.name}`,
+              quote: quote,
+              pitch: raw.bio || '提供专业对口服务。',
+              status: status
+            };
+          });
+          
+          const roleOrder = ['LAWYER', 'INSPECTOR', 'BROKER', 'VALUER', 'PHOTOGRAPHER', 'STAGER'];
+          mapped.sort((a: any, b: any) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
+
+          setProviders(mapped);
+        }
+      } catch (err) {
+        console.error("Failed to fetch providers", err);
       }
     };
+
     fetchProviders();
   }, []);
 
