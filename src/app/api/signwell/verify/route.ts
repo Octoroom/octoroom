@@ -8,18 +8,10 @@ const supabaseAdmin = createClient(
 
 export async function POST(request: Request) {
   try {
-    const { documentId, propertyId, buyerId } = await request.json();
+    const { documentId, propertyId, buyerId: userId, isSeller, offerTerms } = await request.json();
 
-    if (!documentId || !propertyId || !buyerId) {
+    if (!documentId || !propertyId || !userId) {
       return NextResponse.json({ error: "缺少必要参数" }, { status: 400 });
-    }
-
-    // 🌟 1. 核心大招：先通过 buyerId 拿到买家的真实邮箱 (这是唯一绝对不变的凭证)
-    const { data: authData } = await supabaseAdmin.auth.admin.getUserById(buyerId);
-    const buyerEmail = authData.user?.email;
-
-    if (!buyerEmail) {
-       return NextResponse.json({ error: "系统无法获取当前买家的验证邮箱" }, { status: 400 });
     }
 
     // 2. 去 SignWell 官方 API 查这个合同的真实状态
@@ -33,38 +25,62 @@ export async function POST(request: Request) {
 
     const docData = await swResponse.json();
 
-    // 打印全量收件人数据，以防万一
-    console.log("🔍 SignWell 完整收件人列表:", JSON.stringify(docData.recipients));
-
-    // 3. 🌟 终极绝杀：不用 ID，直接用邮箱去找我们的买家！
-    const buyer = docData.recipients?.find((r: any) => r.email === buyerEmail);
+    // 3. 核心大招：根据身份匹配签署人
+    const roleId = isSeller ? 'seller_id' : 'buyer_id';
+    const signer = docData.recipients?.find((r: any) => r.id === roleId);
     
     // 如果没找到，或者状态还没签完
-    if (!buyer || (buyer.status !== 'signed' && buyer.status !== 'completed')) {
-      console.log(`⏳ 邮箱为 [${buyerEmail}] 的买家尚未签字，当前状态:`, buyer?.status || '未找到该邮箱');
+    if (!signer || (signer.status !== 'signed' && signer.status !== 'completed')) {
+      console.log(`⏳ 身份为 [${roleId}] 的用户尚未签字，当前状态:`, signer?.status || '未找到');
       return NextResponse.json({ signed: false });
     }
 
-    console.log("✅ 成功匹配买家邮箱，确认已签字！准备写入数据库...");
+    console.log(`✅ 成功匹配身份为 [${roleId}] 的签署人，确认已签字！准备写入/更新数据库...`);
 
-    // 4. 检查数据库是否已经有记录 (防止重复插入)
-    const { data: existingOffer } = await supabaseAdmin
-      .from('octo_offers')
-      .select('id')
-      .eq('property_id', propertyId)
-      .eq('buyer_id', buyerId)
-      .single();
+    // 4. 检查数据库是否已经有记录 (防止重复插入或更新)
+    if (!isSeller) {
+      const { data: existingOffer } = await supabaseAdmin
+        .from('octo_offers')
+        .select('id')
+        .eq('property_id', propertyId)
+        .eq('buyer_id', userId)
+        .single();
 
-    if (!existingOffer) {
-      // 插入新 Offer
-      const { error } = await supabaseAdmin.from('octo_offers').insert({
-        property_id: propertyId,
-        buyer_id: buyerId,
-        signwell_doc_id: documentId,
-        status: 'pending_seller_signature'
-      });
+      if (!existingOffer) {
+        // 插入新 Offer，并包含所有的 S&P 详细条款
+        const insertData: any = {
+          property_id: propertyId,
+          buyer_id: userId,
+          signwell_doc_id: documentId,
+          status: 'pending_seller_signature'
+        };
+
+        if (offerTerms) {
+          insertData.legal_buyer_name = offerTerms.purchaserName || null;
+          insertData.buyer_address = offerTerms.buyerAddress || null;
+          insertData.contact_number = offerTerms.contactNumber || null;
+          insertData.buyer_lawyer_id = offerTerms.buyerLawyerId || null;
+          insertData.buyer_lawyer_name = offerTerms.buyerLawyerName || null;
+          insertData.buyer_lawyer_address = offerTerms.buyerLawyerAddress || null;
+          insertData.buyer_lawyer_contact = offerTerms.buyerLawyerContact || null;
+          insertData.offer_price = offerTerms.offerPrice || null;
+          insertData.finance_type = offerTerms.financeType || 'cash';
+          insertData.finance_days = offerTerms.financeDays || 0;
+          insertData.deposit = offerTerms.deposit || 0;
+          insertData.settlement_date = offerTerms.settlementDate || null;
+          insertData.conditions = offerTerms.conditions || null;
+        }
+
+        const { error } = await supabaseAdmin.from('octo_offers').insert(insertData);
+        if (error) throw error;
+      }
+    } else {
+      // 卖家的话，更新状态为 accepted
+      const { error } = await supabaseAdmin
+        .from('octo_offers')
+        .update({ status: 'accepted' })
+        .match({ signwell_doc_id: documentId });
       if (error) throw error;
-      console.log(`🎉 写入成功！Offer 状态已更新！`);
     }
 
     return NextResponse.json({ signed: true });

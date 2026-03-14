@@ -1,13 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 export default function ContractPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const propertyId = params?.id as string;
+  const urlOfferId = searchParams?.get('offerId') as string | null;
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [loading, setLoading] = useState(true);
@@ -17,6 +19,7 @@ export default function ContractPage() {
   const [propertyStatus, setPropertyStatus] = useState<string>('loading');
   const [userId, setUserId] = useState<string | null>(null);
   const [offerId, setOfferId] = useState<string | null>(null);
+  const [isSeller, setIsSeller] = useState<boolean>(false);
   
   const [templates] = useState([
     { id: '9b6eeb8e-9cf7-4cf2-99e8-34d1c7782f14', title: '新西兰标准房屋买卖协议 (S&P)' },
@@ -37,21 +40,33 @@ export default function ContractPage() {
 
       const { data: propData } = await supabase
         .from('octo_properties')
-        .select('status')
+        .select('status, author_id')
         .eq('id', propertyId)
         .single();
-      if (propData) setPropertyStatus(propData.status);
+      if (propData) {
+        setPropertyStatus(propData.status);
+        setIsSeller(propData.author_id === user.id);
+      }
 
-      const { data: offer } = await supabase
+      let offerQuery = supabase
         .from('octo_offers')
-        .select('id, status')
-        .eq('property_id', propertyId)
-        .eq('buyer_id', user.id)
-        .single();
+        .select('id, status, signwell_doc_id')
+        .eq('property_id', propertyId);
+
+      if (urlOfferId) {
+        offerQuery = offerQuery.eq('id', urlOfferId);
+      } else {
+        offerQuery = offerQuery.eq('buyer_id', user.id);
+      }
+      
+      const { data: offer } = await offerQuery.single();
         
       if (offer) {
         setOfferId(offer.id);
-        setStep(3);
+        const isUserSeller = propData?.author_id === user.id;
+        if (!isUserSeller || offer.status === 'accepted' || offer.status === 'sold') {
+          setStep(3);
+        }
       }
       setLoading(false);
 
@@ -81,10 +96,13 @@ export default function ContractPage() {
     if (!userId) return;
     setVerifying(true);
     try {
+      const termsStr = sessionStorage.getItem(`offer_terms_${propertyId}`);
+      const offerTerms = termsStr ? JSON.parse(termsStr) : null;
+
       const response = await fetch('/api/signwell/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentId: docIdToVerify, propertyId, buyerId: userId })
+        body: JSON.stringify({ documentId: docIdToVerify, propertyId, buyerId: userId, isSeller, offerTerms })
       });
       const data = await response.json();
       if (data.signed) {
@@ -127,27 +145,58 @@ export default function ContractPage() {
 
       if (pError || !property) throw new Error('找不到该房源信息');
 
-      const response = await fetch('/api/signwell', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          templateId: selectedTemplate,
-          propertyId: propertyId,
-          buyerName: user.user_metadata?.full_name || user.email?.split('@')[0],
-          buyerEmail: user.email,
-          buyerId: user.id
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.signUrl && data.documentId) {
-        setSignUrl(data.signUrl);
-        setDocumentId(data.documentId); 
-        setStep(2); 
-        openSignPopup(data.signUrl, data.documentId); 
+      if (isSeller) {
+        if (!offerId) throw new Error('未能找到对应的买家出价，请返回重试');
+        const { data: offer } = await supabase.from('octo_offers').select('signwell_doc_id').eq('id', offerId).single();
+        if (!offer || !offer.signwell_doc_id) throw new Error('未能找到此出价关联的签署文档');
+          
+        const response = await fetch('/api/signwell/seller', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ documentId: offer.signwell_doc_id })
+        });
+        const data = await response.json();
+        
+        if (data.signUrl && data.documentId) {
+          setSignUrl(data.signUrl);
+          setDocumentId(data.documentId); 
+          setStep(2); 
+          openSignPopup(data.signUrl, data.documentId); 
+        } else {
+          throw new Error(data.error || '获取签署链接失败');
+        }
       } else {
-        throw new Error(data.error || '生成失败');
+        // Read terms from sessionStorage established in the prepare page
+        const termsStr = sessionStorage.getItem(`offer_terms_${propertyId}`);
+        const terms = termsStr ? JSON.parse(termsStr) : null;
+        
+        const finalBuyerName = terms?.purchaserName 
+          ? terms.purchaserName 
+          : (user.user_metadata?.full_name || user.email?.split('@')[0]);
+
+        const response = await fetch('/api/signwell', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            templateId: selectedTemplate,
+            propertyId: propertyId,
+            buyerName: finalBuyerName,
+            buyerEmail: user.email,
+            buyerId: user.id
+            // Note: Additional terms like price and conditions can be mapped here later when SignWell template tags are set up
+          }),
+        });
+
+        const data = await response.json();
+
+        if (data.signUrl && data.documentId) {
+          setSignUrl(data.signUrl);
+          setDocumentId(data.documentId); 
+          setStep(2); 
+          openSignPopup(data.signUrl, data.documentId); 
+        } else {
+          throw new Error(data.error || '生成失败');
+        }
       }
     } catch (error: any) {
       alert(error.message);
@@ -191,7 +240,7 @@ export default function ContractPage() {
                 </div>
               </div>
               <button onClick={handleGenerateContract} disabled={loading} className={`w-full py-5 rounded-2xl font-black text-xl shadow-2xl transition-all ${loading ? 'bg-gray-200 text-gray-400' : 'bg-black text-white hover:bg-gray-800 active:scale-[0.98]'}`}>
-                {loading ? '正在与加密网络建立连接...' : '生成正式合同并开始出价 (Submit Offer)'}
+                {loading ? '正在与加密网络建立连接...' : (isSeller ? '审核并接受出价 (Review & Accept Offer)' : '生成正式合同并开始出价 (Submit Offer)')}
               </button>
             </div>
           </div>
@@ -227,10 +276,13 @@ export default function ContractPage() {
              <div className="w-24 h-24 bg-blue-600 text-white rounded-full flex items-center justify-center mx-auto mb-8 shadow-xl shadow-blue-200">
                 <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0116 0z" /></svg>
              </div>
-             <h2 className="text-3xl font-black text-gray-900 mb-4">Offer 已成功提交！</h2>
+             <h2 className="text-3xl font-black text-gray-900 mb-4">{isSeller ? 'Offer 已成功接受！' : 'Offer 已成功提交！'}</h2>
              <p className="text-blue-800 mb-10 text-lg font-medium">
-               您的 S&P 协议签字已完成，我们已自动通知房东进行审核。<br/>
-               在房东签字确认前，您可以在工作台随时查看 Offer 进度。
+               {isSeller ? (
+                 <>您已成功签署接受该出价，合同已正式生效，<br/>系统将通知买家准备支付定金。</>
+               ) : (
+                 <>您的 S&P 协议签字已完成，我们已自动通知房东进行审核。<br/>在房东签字确认前，您可以在工作台随时查看 Offer 进度。</>
+               )}
              </p>
              
              {/* 🌟 核心修改点：带上 tab 参数，直接跳转回房源室的 OA 面板 */}

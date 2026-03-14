@@ -124,9 +124,11 @@ const PropertyMap = ({ lat, lng, address }: { lat: number, lng: number, address:
 // ==========================================
 // 🌟 核心：基于真实数据的 OA 流业务组件
 // ==========================================
-const WorkflowTimelineTab = ({ propertyId, property, setActiveTab }: { propertyId: string, property: any, setActiveTab: (tab: any) => void }) => {
+const WorkflowTimelineTab = ({ propertyId, property, setActiveTab, currentUserRole }: { propertyId: string, property: any, setActiveTab: (tab: any) => void, currentUserRole: Role }) => {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [offer, setOffer] = useState<any>(null);
+  const [buyerProfile, setBuyerProfile] = useState<{username: string, avatar_url: string} | null>(null);
 
   // 用于倒计时的演示基准时间
   const tomorrow = new Date(Date.now() + 86400000).toISOString();
@@ -139,16 +141,29 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab }: { propertyI
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data, error } = await supabase
-        .from('octo_offers')
-        .select('*')
-        .eq('property_id', propertyId)
-        .eq('buyer_id', user.id)
-        .single();
+      let query = supabase.from('octo_offers').select('*').eq('property_id', propertyId);
+
+      // 🌟 核心逻辑：买卖双方获取 Offer 的逻辑不同
+      if (currentUserRole === 'BUYER') {
+        // 买家：只看自己发出的 Offer
+        query = query.eq('buyer_id', user.id).single();
+      } else {
+        // 卖家：获取被正式接受的 Offer，或者如果没有，则获取最新的一个作为待办展示 (但会提示去大厅审核)
+        query = query.order('status', { ascending: true }).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      }
+
+      const { data, offerError } = await query;
 
       if (data) {
         setOffer(data);
-        // 开启实时监听，当房东确认时状态瞬间更新
+        
+        // 🌟 动态获取买家信息
+        if (data.buyer_id) {
+          const { data: profile } = await supabase.from('profiles').select('username, avatar_url').eq('id', data.buyer_id).maybeSingle();
+          if (profile) setBuyerProfile(profile);
+        }
+
+        // 开启实时监听，当状态改变时瞬间更新
         channel = supabase
           .channel('oa-status-updates')
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'octo_offers', filter: `id=eq.${data.id}` },
@@ -160,34 +175,52 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab }: { propertyI
 
     fetchOffer();
     return () => { if (channel) supabase.removeChannel(channel); };
-  }, [propertyId]);
+  }, [propertyId, currentUserRole]);
 
   if (loading) return <div className="py-20 text-center text-gray-400 font-bold">同步加密网络中...</div>;
   
-  // 🌟 空状态：如果没查到 Offer，提示买家去签合同
-  if (!offer) return (
-    <div className="py-24 text-center flex flex-col items-center animate-in fade-in zoom-in-95">
-      <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-6 shadow-sm border border-gray-100">
-        <svg className="w-10 h-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+  // 🌟 空状态：根据角色显示不同文案
+  const isAccepted = offer?.status === 'accepted' || offer?.status === 'sold';
+
+  if (!offer || (currentUserRole === 'SELLER' && !isAccepted)) {
+    return (
+      <div className="py-24 text-center flex flex-col items-center animate-in fade-in zoom-in-95">
+        <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-6 shadow-sm border border-gray-100">
+          <svg className="w-10 h-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+        </div>
+        <h3 className="text-xl font-black text-gray-900 mb-2">
+          {currentUserRole === 'SELLER' ? '等待确认出价 ⏳' : '暂无交易数据'}
+        </h3>
+        <p className="text-[15px] text-gray-500 mb-8 max-w-[280px] leading-relaxed">
+          {currentUserRole === 'SELLER' 
+            ? '您需要先前往"出价大厅"审核并接受买家提交的 Offer，之后系统将为您自动在此生成完整交易流 (OA)。' 
+            : '您尚未对该房源发起意向，起草并签署合同后即可解锁控制台。'}
+        </p>
+        {currentUserRole === 'SELLER' && (
+          <button 
+            onClick={() => router.push(`/property/${propertyId}/offers`)}
+            className="px-6 py-2.5 bg-black text-white rounded-xl font-bold text-[14px] shadow-md hover:bg-gray-800 transition-colors"
+          >
+            前往出价管理大厅 →
+          </button>
+        )}
       </div>
-      <h3 className="text-xl font-black text-gray-900 mb-2">暂无交易数据</h3>
-      <p className="text-[15px] text-gray-500 mb-8 max-w-[260px] leading-relaxed">您尚未对该房源发起意向，起草并签署合同后即可解锁控制台。</p>
-    </div>
-  );
+    );
+  }
 
-  // 根据真实的数据库状态判定进度
-  const isAccepted = offer.status === 'accepted' || offer.status === 'sold';
+  const buyerName = buyerProfile?.username || '买家';
+  const buyerAvatar = buyerProfile?.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix';
 
-  // 🌟 动态构建步骤数组 (这里就是真实业务逻辑！)
+  // 🌟 动态构建步骤数组
   const oaSteps: OAStep[] = [
-    { id: 'step_1', title: '买家签署 S&P 购房协议', description: '买方已完成线上电子签名，Offer 正式生成。', role: 'SYSTEM', status: 'COMPLETED', completedAt: offer.created_at },
-    { id: 'step_2', title: '房东审核出价并签字确认', description: `正在等待房东 ${property?.author_name || ''} 审核您的出价并完成签名。`, role: 'SELLER', status: isAccepted ? 'COMPLETED' : 'IN_PROGRESS', dueDate: !isAccepted ? tomorrow : undefined },
-    { id: 'step_3', title: '买家支付 10% 定金', description: '请将定金打入中介或律师的 Trust Account (信托账户)。', role: 'BUYER', status: isAccepted ? 'IN_PROGRESS' : 'PENDING', dueDate: isAccepted ? tomorrow : undefined },
+    { id: 'step_1', title: `${buyerName} 签署 S&P 购房协议`, description: `${buyerName} 已完成线上电子签名，Offer 正式生成。`, role: 'SYSTEM', status: 'COMPLETED', completedAt: offer.created_at },
+    { id: 'step_2', title: '房东审核出价并签字确认', description: `正在等待房东 ${property?.author_name || ''} 审核 ${buyerName} 的出价并完成签名。`, role: 'SELLER', status: isAccepted ? 'COMPLETED' : 'IN_PROGRESS', dueDate: !isAccepted ? tomorrow : undefined },
+    { id: 'step_3', title: `${buyerName} 支付 10% 定金`, description: '请将定金打入中介或律师的 Trust Account (信托账户)。', role: 'BUYER', status: isAccepted ? 'IN_PROGRESS' : 'PENDING', dueDate: isAccepted ? tomorrow : undefined },
     { id: 'step_4', title: '律师审查 Title & LIM 报告', description: '买方律师需确认房屋产权无瑕疵，并审查政府档案。', role: 'LAWYER', status: 'PENDING', dueDate: nextWeek },
     { id: 'step_5', title: '无条件交割日 (Unconditional)', description: '所有购房条件满足，合同正式生效。', role: 'SYSTEM', status: 'PENDING' }
   ];
 
-  // 模拟律师信息 (未来可以从服务商表里联表查出)
+  // 模拟律师信息
   const lawyer = {
     name: 'Jessica Chen',
     role: '买方过户律师',
@@ -197,7 +230,7 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab }: { propertyI
 
   const getRoleBadge = (role: Role) => {
     switch(role) {
-      case 'BUYER': return <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-black">买家任务</span>;
+      case 'BUYER': return <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-black">{buyerName}任务</span>;
       case 'SELLER': return <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[10px] font-black">卖家任务</span>;
       case 'LAWYER': return <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-black">律师跟进</span>;
       case 'SYSTEM': return <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded text-[10px] font-black">系统节点</span>;
@@ -206,8 +239,8 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab }: { propertyI
 
   const getRoleAvatar = (role: Role) => {
     switch(role) {
-      case 'BUYER': return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix';
-      case 'SELLER': return property?.author_avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Seller';
+      case 'BUYER': return buyerAvatar;
+      case 'SELLER': return property?.author_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=Seller`;
       case 'LAWYER': return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jessica';
       case 'SYSTEM': return 'https://api.dicebear.com/7.x/bottts/svg?seed=System';
       default: return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Default';
@@ -220,7 +253,7 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab }: { propertyI
       {/* 🌟 “我的法律代表” 卡片完美植入 */}
       <div className="bg-white rounded-[16px] p-4 border border-gray-200 shadow-sm mb-8">
         <div className="flex justify-between items-center mb-1">
-          <h2 className="text-[13px] font-black text-gray-900">我的法律代表</h2>
+          <h2 className="text-[13px] font-black text-gray-900">当前法律代表</h2>
           <button className="text-[12px] text-orange-500 font-bold hover:underline">更换律师</button>
         </div>
         <div className="flex items-center gap-3 mt-3">
@@ -240,7 +273,10 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab }: { propertyI
 
       {/* 🌟 交易流时间轴 */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <h3 className="text-lg font-black text-gray-900 mb-6">交易流追踪 (OA)</h3>
+        <div className="flex justify-between items-center mb-6">
+           <h3 className="text-lg font-black text-gray-900">交易流追踪 (OA)</h3>
+           {currentUserRole === 'SELLER' && offer && <span className="text-[12px] bg-purple-100 text-purple-700 px-2 py-1 rounded font-bold">买家出价: <span className="text-purple-900">${offer.offer_price?.toLocaleString() || '---'}</span></span>}
+        </div>
         
         <div className="relative border-l-2 border-gray-100 ml-5 space-y-8">
           {oaSteps.map((step) => (
@@ -281,14 +317,26 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab }: { propertyI
                     </span>
                   )}
                   
-                  {step.status === 'IN_PROGRESS' && step.role === 'BUYER' && (
-                    <button onClick={() => step.title.includes('律师') ? setActiveTab('PROVIDERS') : alert('跳转至支付网关...')} className="bg-orange-500 text-white px-4 py-1.5 rounded-lg text-[12px] font-bold hover:bg-orange-600 transition-colors shadow-sm shadow-orange-200">
-                      {step.title.includes('律师') ? '去大厅选律师 →' : '去处理 →'}
+                  {/* 🌟 核心修改：动态识别身份并渲染对应的按钮 */}
+                  {step.status === 'IN_PROGRESS' && step.role === currentUserRole ? (
+                    <button 
+                      onClick={() => {
+                        if (step.role === 'SELLER') {
+                          // 卖家点击，带上 offerId 去合同页签署
+                          router.push(`/contract/${propertyId}?offerId=${offer.id}`);
+                        } else if (step.title.includes('律师')) {
+                          setActiveTab('PROVIDERS');
+                        } else {
+                          alert('跳转至处理页面...');
+                        }
+                      }} 
+                      className="bg-orange-500 text-white px-4 py-1.5 rounded-lg text-[12px] font-bold hover:bg-orange-600 transition-colors shadow-sm shadow-orange-200"
+                    >
+                      {step.role === 'SELLER' ? '去审核并签署 →' : step.title.includes('律师') ? '去大厅选律师 →' : '去处理 →'}
                     </button>
-                  )}
-                  {step.status === 'IN_PROGRESS' && step.role === 'SELLER' && (
+                  ) : step.status === 'IN_PROGRESS' ? (
                     <span className="text-[12px] font-bold text-orange-500 animate-pulse bg-orange-50 px-2 py-1 rounded">正在等待对方处理...</span>
-                  )}
+                  ) : null}
                 </div>
               </div>
 
@@ -309,10 +357,14 @@ export default function PropertyTradeRoom() {
   const params = useParams();
   const searchParams = useSearchParams(); // 🌟 引入查询参数 hook
   const propertyId = params?.id as string;
-  const currentUserRole = 'BUYER'; 
   
   const [property, setProperty] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  // 🌟 动态判断当前用户是卖家还是买家
+  const isSeller = property && currentUserId === property.author_id;
+  const currentUserRole: Role = isSeller ? 'SELLER' : 'BUYER';
 
   // 🌟 根据 URL 参数动态设置默认 Tab
   const defaultTab = (searchParams?.get('tab') as 'DETAILS' | 'WORKFLOW' | 'PROVIDERS') || 'DETAILS';
@@ -323,7 +375,6 @@ export default function PropertyTradeRoom() {
   // --- 🌟 点赞和收藏相关状态 ---
   const [isLiked, setIsLiked] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
     const getUser = async () => {
@@ -506,7 +557,7 @@ export default function PropertyTradeRoom() {
           <div className="flex items-center gap-3">
             <img src={property.author_avatar} className="w-11 h-11 rounded-full bg-gray-100 object-cover shadow-sm" alt="host" />
             <div>
-              <div className="text-[15px] font-bold text-gray-900">屋主: {property.author_name}</div>
+              <div className="text-[15px] font-bold text-gray-900">{isSeller ? '您是屋主' : `屋主: ${property.author_name}`}</div>
               <div className="text-[12px] text-green-600 font-bold flex items-center gap-1">
                 <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
                 产权证已核验
@@ -679,28 +730,39 @@ export default function PropertyTradeRoom() {
       <div className="p-4 md:p-5 flex-1 bg-white md:bg-transparent">
         {activeTab === 'DETAILS' && renderDetailsTab()}
         
-        {/* 🌟 在这里将原来写死的 timeline，替换成了独立封装、完全绑定真实业务的全新组件！ */}
+        {/* 🌟 传入 currentUserRole */}
         {activeTab === 'WORKFLOW' && (
           <WorkflowTimelineTab 
             propertyId={propertyId} 
             property={property} 
             setActiveTab={setActiveTab} 
+            currentUserRole={currentUserRole}
           />
         )}
         
         {activeTab === 'PROVIDERS' && renderProvidersRoom()}
       </div>
       
-      {/* 底部悬浮行动条 */}
+      {/* 🌟 底部悬浮行动条：买卖双方完全不同！ */}
       <div className="fixed bottom-0 left-0 md:left-auto md:w-[640px] w-full p-4 bg-white/90 backdrop-blur-md border-t border-gray-100 shadow-[0_-10px_30px_rgba(0,0,0,0.05)] z-40">
         {activeTab === 'DETAILS' && (
-          <button 
-            onClick={() => router.push(`/contract/${propertyId}`)} 
-            className="w-full py-3.5 rounded-xl font-bold text-[15px] bg-orange-500 text-white shadow-lg shadow-orange-500/30 hover:bg-orange-600 transition-colors flex justify-center items-center gap-2"
-          >
-            发起意向 / 起草合同
-            <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
-          </button>
+          currentUserRole === 'BUYER' ? (
+            <button 
+              onClick={() => router.push(`/contract/${propertyId}/prepare`)} 
+              className="w-full py-3.5 rounded-xl font-bold text-[15px] bg-orange-500 text-white shadow-lg shadow-orange-500/30 hover:bg-orange-600 transition-colors flex justify-center items-center gap-2"
+            >
+              起草买卖协议 (S&P Contract)
+              <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+            </button>
+          ) : (
+            <button 
+              onClick={() => router.push(`/property/${propertyId}/offers`)} 
+              className="w-full py-3.5 rounded-xl font-bold text-[15px] bg-purple-600 text-white shadow-lg shadow-purple-500/30 hover:bg-purple-700 transition-colors flex justify-center items-center gap-2"
+            >
+              前往出价大厅 (Offers Hub)
+              <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
+            </button>
+          )
         )}
         {(activeTab === 'WORKFLOW' || activeTab === 'PROVIDERS') && (
           <button className="w-full py-3.5 rounded-xl font-bold text-[15px] bg-gray-900 text-white shadow-lg shadow-gray-900/30 hover:bg-black transition-colors flex justify-center items-center gap-2">
