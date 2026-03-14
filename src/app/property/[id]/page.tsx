@@ -141,7 +141,7 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab, currentUserRo
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      let query = supabase.from('octo_offers').select('*').eq('property_id', propertyId);
+      let query: any = supabase.from('octo_offers').select('*').eq('property_id', propertyId);
 
       // 🌟 核心逻辑：买卖双方获取 Offer 的逻辑不同
       if (currentUserRole === 'BUYER') {
