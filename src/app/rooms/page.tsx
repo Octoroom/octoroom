@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
+import { useLanguage } from '@/lib/i18n';
 
 // --- 矢量图标库 ---
 const Icons = {
@@ -16,9 +17,9 @@ const Icons = {
 };
 
 const baseFacilityOptions = [
-  { id: 'wifi', label: '高速网络' }, { id: 'ac', label: '冷暖空调' },
-  { id: 'kitchen', label: '全套厨房' }, { id: 'washer', label: '洗衣机' },
-  { id: 'bathroom', label: '独立卫浴' }, { id: 'workspace', label: '专属工作区' }
+  { id: 'wifi', labelZh: '高速网络', labelEn: 'High-Speed Wi-Fi' }, { id: 'ac', labelZh: '冷暖空调', labelEn: 'Heating & Cooling' },
+  { id: 'kitchen', labelZh: '全套厨房', labelEn: 'Full Kitchen' }, { id: 'washer', labelZh: '洗衣机', labelEn: 'Washing Machine' },
+  { id: 'bathroom', labelZh: '独立卫浴', labelEn: 'Private Ensuite' }, { id: 'workspace', labelZh: '专属工作区', labelEn: 'Workspace' }
 ];
 
 // 🌟 扩充接口属性以支持地图字段
@@ -134,6 +135,7 @@ function RoomCardSlider({ images, viewMode, roomCity, isMarked, toggleMark, aspe
 
 export default function RoomsPage() {
   const router = useRouter();
+  const { t, lang } = useLanguage();
   
   const [activeTab, setActiveTab] = useState<'recommend' | 'bookings'>('recommend');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -286,12 +288,12 @@ export default function RoomsPage() {
 
   const handleCancelBooking = async (e: React.MouseEvent, bookingId: string) => {
     e.stopPropagation(); 
-    if (!window.confirm("确定要取消这个预定吗？")) return;
+    if (!window.confirm(t('bookings.cancel.confirm'))) return;
     try {
       const { error } = await supabase.from('octo_bookings').update({ status: 'cancelled' }).eq('id', bookingId);
       if (error) throw error;
       setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'cancelled' } : b));
-    } catch (err: any) { alert("取消失败：" + err.message); }
+    } catch (err: any) { alert(t('alert.cancelFailed') + '：' + err.message); }
   };
 
   const toggleFilterAmenity = (id: string) => { setFilterAmenities(prev => prev.includes(id) ? prev.filter(a => a !== id) : [...prev, id]); };
@@ -300,8 +302,8 @@ export default function RoomsPage() {
   return (
     <main className="flex-1 max-w-[640px] w-full min-h-screen border-r border-gray-100 bg-white flex flex-col relative pb-10">
       <div className="flex w-full border-b border-gray-100 bg-white/90 backdrop-blur-md sticky top-0 z-40 relative">
-        <button onClick={() => setActiveTab('recommend')} className={`flex-1 py-3.5 text-[14px] transition-colors duration-300 relative z-10 ${activeTab === 'recommend' ? 'font-bold text-gray-900' : 'font-medium text-gray-400'}`}>神秘房间</button>
-        <button onClick={() => setActiveTab('bookings')} className={`flex-1 py-3.5 text-[14px] transition-colors duration-300 relative z-10 ${activeTab === 'bookings' ? 'font-bold text-gray-900' : 'font-medium text-gray-400'}`}>我的预定</button>
+        <button onClick={() => setActiveTab('recommend')} className={`flex-1 py-3.5 text-[14px] transition-colors duration-300 relative z-10 ${activeTab === 'recommend' ? 'font-bold text-gray-900' : 'font-medium text-gray-400'}`}>{t('rooms.tab.discover')}</button>
+        <button onClick={() => setActiveTab('bookings')} className={`flex-1 py-3.5 text-[14px] transition-colors duration-300 relative z-10 ${activeTab === 'bookings' ? 'font-bold text-gray-900' : 'font-medium text-gray-400'}`}>{t('rooms.tab.bookings')}</button>
         <div className="absolute bottom-0 h-[3px] bg-blue-600 rounded-full transition-all duration-500 ease-in-out w-12" style={{ left: activeTab === 'recommend' ? '25%' : '75%', transform: 'translateX(-50%)' }}></div>
       </div>
 
@@ -309,14 +311,14 @@ export default function RoomsPage() {
         <div className="flex-1 flex items-center gap-2">
           <div className="relative flex-1 group">
             <div className="absolute inset-y-0 left-3.5 flex items-center pointer-events-none"><svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-gray-400"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"></path></svg></div>
-            <input type="text" placeholder="搜索神秘房间，例如：巴黎..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={handleSearch} className="w-full bg-gray-50 border border-gray-100 text-[14px] font-medium text-gray-900 rounded-full pl-10 pr-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500/20" />
+            <input type="text" placeholder={t('rooms.search.placeholder')} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={handleSearch} className="w-full bg-gray-50 border border-gray-100 text-[14px] font-medium text-gray-900 rounded-full pl-10 pr-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500/20" />
           </div>
-          <button onClick={() => fetchData(searchQuery)} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2.5 rounded-full text-[14px] font-bold shadow-sm transition-colors flex-shrink-0">搜索</button>
+          <button onClick={() => fetchData(searchQuery)} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2.5 rounded-full text-[14px] font-bold shadow-sm transition-colors flex-shrink-0">{t('rooms.search.button')}</button>
         </div>
 
         <button onClick={() => router.push('/my-rooms')} className="flex-shrink-0 bg-white border border-gray-200 hover:border-blue-500 hover:text-blue-500 text-gray-700 font-bold py-2.5 px-4 rounded-full shadow-sm hover:shadow transition-all flex items-center gap-1.5 text-[13px]">
           <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"></path></svg>
-          <span className="hidden sm:inline">我的房源</span>
+          <span className="hidden sm:inline">{t('rooms.myListings')}</span>
         </button>
       </div>
 
@@ -324,13 +326,13 @@ export default function RoomsPage() {
         <div className="bg-white border-b border-gray-100 px-4 pb-3 pt-1 flex items-center gap-2 overflow-x-auto scrollbar-hide z-20 shadow-[0_4px_10px_rgba(0,0,0,0.02)]">
           <button onClick={() => setIsFilterModalOpen(true)} className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full border-2 border-gray-200 bg-white text-[13px] font-bold text-gray-700 hover:border-blue-500 hover:bg-blue-50 transition-colors">
             <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75"></path></svg>
-            高级筛选
+            {t('rooms.filter.advanced')}
             {activeFilterCount > 0 && <span className="ml-1 w-4 h-4 bg-blue-600 text-white text-[10px] rounded-full flex items-center justify-center">{activeFilterCount}</span>}
           </button>
           
-          <button onClick={() => setFilterSortBy(prev => prev === 'price_asc' ? 'newest' : 'price_asc')} className={`flex-shrink-0 px-3 py-1.5 rounded-full border transition-all text-[13px] font-medium ${filterSortBy === 'price_asc' ? 'bg-blue-50 border-blue-500 text-blue-600 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>价格最低</button>
-          <button onClick={() => setFilterRoomType(prev => prev === 'entire' ? 'all' : 'entire')} className={`flex-shrink-0 px-3 py-1.5 rounded-full border transition-all text-[13px] font-medium ${filterRoomType === 'entire' ? 'bg-blue-50 border-blue-500 text-blue-600 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>整套出租</button>
-          <button onClick={() => setFilterRoomType(prev => prev === '独立单间' ? 'all' : '独立单间')} className={`flex-shrink-0 px-3 py-1.5 rounded-full border transition-all text-[13px] font-medium ${filterRoomType === '独立单间' ? 'bg-blue-50 border-blue-500 text-blue-600 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>独立单间</button>
+          <button onClick={() => setFilterSortBy(prev => prev === 'price_asc' ? 'newest' : 'price_asc')} className={`flex-shrink-0 px-3 py-1.5 rounded-full border transition-all text-[13px] font-medium ${filterSortBy === 'price_asc' ? 'bg-blue-50 border-blue-500 text-blue-600 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>{t('rooms.filter.lowest')}</button>
+          <button onClick={() => setFilterRoomType(prev => prev === 'entire' ? 'all' : 'entire')} className={`flex-shrink-0 px-3 py-1.5 rounded-full border transition-all text-[13px] font-medium ${filterRoomType === 'entire' ? 'bg-blue-50 border-blue-500 text-blue-600 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>{t('rooms.filter.entire')}</button>
+          <button onClick={() => setFilterRoomType(prev => prev === '独立单间' ? 'all' : '独立单间')} className={`flex-shrink-0 px-3 py-1.5 rounded-full border transition-all text-[13px] font-medium ${filterRoomType === '独立单间' ? 'bg-blue-50 border-blue-500 text-blue-600 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>{t('rooms.filter.single')}</button>
 
           <div className="ml-auto flex bg-gray-100 p-0.5 rounded-full flex-shrink-0">
             <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-full transition-all ${viewMode === 'grid' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}><svg fill="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 0h6v6h-6v-6z"></path></svg></button>
@@ -339,7 +341,7 @@ export default function RoomsPage() {
         </div>
       ) : (
         <div className="bg-white border-b border-gray-100 px-4 py-2 flex items-center justify-between z-20 shadow-[0_4px_10px_rgba(0,0,0,0.02)]">
-          <span className="text-[13px] font-bold text-gray-500">共 {bookings.length} 个预定行程</span>
+          <span className="text-[13px] font-bold text-gray-500">{lang === 'en' ? `${bookings.length} bookings` : `共 ${bookings.length} 个预定行程`}</span>
           <div className="flex bg-gray-100 p-0.5 rounded-full flex-shrink-0">
             <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-full transition-all ${viewMode === 'grid' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}><svg fill="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 0h6v6h-6v-6z"></path></svg></button>
             <button onClick={() => setViewMode('list')} className={`p-1.5 rounded-full transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}><svg fill="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z"></path></svg></button>
@@ -354,9 +356,9 @@ export default function RoomsPage() {
           filteredRooms.length === 0 ? (
             <div className="text-center py-20">
               <div className="flex justify-center mb-4 text-gray-300"><svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-16 h-16"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 21v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21m0 0h4.5V3.75M5.25 9h3.75m-3.75 3h3.75m-3.75-6h3.75m-3.75 3h3.75m-3.75 3h3.75M9 21v-8.25"></path></svg></div>
-              <h3 className="text-lg font-bold text-gray-900">没有符合条件的房源</h3>
-              <p className="text-sm text-gray-500 mt-2">请尝试调整筛选条件或搜索其他城市</p>
-              <button onClick={() => {setFilterRoomType('all'); setFilterAmenities([]); setFilterSortBy('newest');}} className="mt-4 text-blue-600 font-bold hover:underline">清除筛选</button>
+              <h3 className="text-lg font-bold text-gray-900">{t('rooms.empty')}</h3>
+              <p className="text-sm text-gray-500 mt-2">{t('rooms.empty.hint')}</p>
+              <button onClick={() => {setFilterRoomType('all'); setFilterAmenities([]); setFilterSortBy('newest');}} className="mt-4 text-blue-600 font-bold hover:underline">{t('rooms.empty.clear')}</button>
             </div>
           ) : (
             <div className={viewMode === 'grid' ? "columns-2 gap-3 space-y-3" : "flex flex-col gap-5"}>
@@ -377,7 +379,7 @@ export default function RoomsPage() {
                     <div className={`flex flex-col justify-between flex-1 ${viewMode === 'grid' ? 'p-3' : 'p-4 sm:p-5'}`}>
                       <div>
                         {viewMode === 'list' && (
-                          <div className="text-[13px] font-bold text-gray-400 mb-1.5">{room.room_type || '独立单间'}</div>
+                          <div className="text-[13px] font-bold text-gray-400 mb-1.5">{lang === 'en' ? (room.room_type === '独立单间' ? 'Private Room' : room.room_type === '整套出租' ? 'Entire Place' : room.room_type || 'Private Room') : (room.room_type || '独立单间')}</div>
                         )}
                         
                         <h2 className={`font-bold text-gray-900 group-hover:text-blue-600 transition-colors leading-snug ${viewMode === 'grid' ? 'text-[13.5px] line-clamp-2 mb-1.5' : 'text-[18px] line-clamp-1 mb-1.5'}`}>
@@ -386,7 +388,7 @@ export default function RoomsPage() {
                         
                         {viewMode === 'grid' && (
                           <div className="text-[14px] font-black text-blue-600 mb-2.5">
-                            {room.price?.includes('晚') ? room.price : `${room.price || '面议'} / 晚`}
+                            {room.price?.includes('晚') ? room.price : `${room.price || t('rooms.negotiate')} ${t('rooms.perNight')}`}
                           </div>
                         )}
 
@@ -394,7 +396,7 @@ export default function RoomsPage() {
                           <div className="flex flex-wrap items-center gap-2 mt-3 mb-1">
                              {room.amenities.split(',').map(s=>s.trim()).filter(Boolean).slice(0, 5).map(item => {
                                 const Icon = Icons[item as keyof typeof Icons];
-                                const label = item === 'wifi' ? 'Wi-Fi' : item === 'ac' ? '空调' : item === 'kitchen' ? '厨房' : item === 'washer' ? '洗衣机' : item === 'bathroom' ? '独立卫浴' : item === 'workspace' ? '工作区' : item;
+                                const label = item === 'wifi' ? 'Wi-Fi' : item === 'ac' ? t('amenity.ac') : item === 'kitchen' ? t('amenity.kitchen') : item === 'washer' ? t('amenity.washer') : item === 'bathroom' ? t('amenity.bathroom') : item === 'workspace' ? t('amenity.workspace') : item;
                                 if (!Icon) return null;
                                 return (
                                   <div key={item} className="flex items-center gap-1.5 text-gray-600 bg-gray-50 border border-gray-100 px-2.5 py-1 rounded-lg text-[11px] font-medium" title={item}>
@@ -438,7 +440,7 @@ export default function RoomsPage() {
                            </div>
 
                            <div className="flex items-center gap-4">
-                             <div className="text-[17px] font-black text-blue-600">{room.price?.includes('晚') ? room.price : `${room.price || '面议'} / 晚`}</div>
+                             <div className="text-[17px] font-black text-blue-600">{room.price?.includes('晚') ? room.price : `${room.price || t('rooms.negotiate')} ${t('rooms.perNight')}`}</div>
                              <div className="flex items-center gap-2 cursor-pointer hover:opacity-75 transition-opacity" onClick={(e) => { e.stopPropagation(); router.push(`/profile/${room.author_id}`); }}>
                                <span className="text-[13px] font-bold text-gray-700 hidden sm:block">{room.author_name}</span>
                                <img src={room.author_avatar} className="w-8 h-8 rounded-full bg-gray-200 object-cover shadow-sm border border-gray-100" alt="avatar" />
@@ -459,7 +461,7 @@ export default function RoomsPage() {
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"></path>
                                 )}
                               </svg>
-                              <span className={`text-[11px] font-medium ${isLiked ? 'text-red-500' : 'text-gray-400'}`}>{likesCount > 0 ? likesCount : '赞'}</span>
+                              <span className={`text-[11px] font-medium ${isLiked ? 'text-red-500' : 'text-gray-400'}`}>{likesCount > 0 ? likesCount : t('rooms.like')}</span>
                            </button>
                         </div>
                       )}
@@ -473,7 +475,7 @@ export default function RoomsPage() {
           bookings.length === 0 ? (
             <div className="text-center py-20">
               <div className="flex justify-center mb-4 text-gray-300"><svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-16 h-16"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"></path></svg></div>
-              <h3 className="text-lg font-bold text-gray-900">暂无预定</h3>
+              <h3 className="text-lg font-bold text-gray-900">{t('rooms.noBookings')}</h3>
             </div>
           ) : (
             <div className={viewMode === 'grid' ? "columns-2 gap-3 space-y-3" : "flex flex-col gap-5"}>
@@ -482,12 +484,12 @@ export default function RoomsPage() {
                 if (!room) return null;
 
                 const statusConf = {
-                  'paid': { text: '已预定', className: 'text-green-600 bg-green-50 border-green-100' },
-                  'approved': { text: '待付款', className: 'text-orange-500 bg-orange-50 border-orange-100' },
-                  'rejected': { text: '已婉拒', className: 'text-red-500 bg-red-50 border-red-100' },
-                  'cancelled': { text: '已取消', className: 'text-gray-500 bg-gray-50 border-gray-200' },
-                  'pending': { text: '审核中', className: 'text-blue-500 bg-blue-50 border-blue-100' }
-                }[booking.status as string] || { text: '处理中', className: 'text-gray-500 bg-gray-50 border-gray-100' };
+                  'paid': { text: t('status.paid'), className: 'text-green-600 bg-green-50 border-green-100' },
+                  'approved': { text: t('status.approved'), className: 'text-orange-500 bg-orange-50 border-orange-100' },
+                  'rejected': { text: t('status.rejected'), className: 'text-red-500 bg-red-50 border-red-100' },
+                  'cancelled': { text: t('status.cancelled'), className: 'text-gray-500 bg-gray-50 border-gray-200' },
+                  'pending': { text: t('status.pending'), className: 'text-blue-500 bg-blue-50 border-blue-100' }
+                }[booking.status as string] || { text: t('status.processing'), className: 'text-gray-500 bg-gray-50 border-gray-100' };
                 
                 const isMarked = userMarks.has(room.id);
                 const aspectClass = viewMode === 'grid' ? gridAspectRatios[room.id.charCodeAt(0) % gridAspectRatios.length] : '';
@@ -507,7 +509,7 @@ export default function RoomsPage() {
                     <div className={`flex flex-col justify-between flex-1 ${viewMode === 'grid' ? 'p-3' : 'p-4 sm:p-5'}`}>
                       <div>
                         <div className="flex items-center justify-between mb-1.5">
-                           <div className="text-[11px] sm:text-[13px] font-bold text-gray-400">{room.room_type || '独立单间'}</div>
+                           <div className="text-[11px] sm:text-[13px] font-bold text-gray-400">{lang === 'en' ? (room.room_type === '独立单间' ? 'Private Room' : room.room_type === '整套出租' ? 'Entire Place' : room.room_type || 'Private Room') : (room.room_type || '独立单间')}</div>
                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border flex-shrink-0 ${statusConf.className}`}>{statusConf.text}</span>
                         </div>
                         
@@ -522,7 +524,7 @@ export default function RoomsPage() {
 
                         {viewMode === 'grid' && (
                           <div className="text-[14px] font-black text-blue-600 mb-1">
-                            {room.price?.includes('晚') ? room.price : `${room.price || '面议'} / 晚`}
+                            {room.price?.includes('晚') ? room.price : `${room.price || t('rooms.negotiate')} ${t('rooms.perNight')}`}
                           </div>
                         )}
                       </div>
@@ -530,7 +532,7 @@ export default function RoomsPage() {
                       {viewMode === 'list' && (
                           <div className="flex items-end justify-between mt-4 pt-4 border-t border-gray-50">
                               <div className="flex items-center gap-4">
-                                 <div className="text-[17px] font-black text-blue-600">{room.price?.includes('晚') ? room.price : `${room.price || '面议'} / 晚`}</div>
+                                 <div className="text-[17px] font-black text-blue-600">{room.price?.includes('晚') ? room.price : `${room.price || t('rooms.negotiate')} ${t('rooms.perNight')}`}</div>
                                  <div className="text-[12px] text-gray-400">下单: {new Date(booking.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(/\//g, '-')}</div>
                               </div>
                               <div className="flex items-center gap-2 cursor-pointer hover:opacity-75 transition-opacity" onClick={(e) => { e.stopPropagation(); router.push(`/profile/${room.author_id}`); }}>
@@ -561,25 +563,26 @@ export default function RoomsPage() {
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm sm:p-4 animate-fade-in-up">
           <div className="bg-white w-full sm:max-w-lg rounded-t-[24px] sm:rounded-[24px] flex flex-col max-h-[90vh] shadow-2xl">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
-              <h2 className="text-[18px] font-black text-gray-900">高级筛选</h2>
+              <h2 className="text-[18px] font-black text-gray-900">{t('filter.title')}</h2>
               <button onClick={() => setIsFilterModalOpen(false)} className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-gray-600 hover:bg-gray-200 transition-colors"><svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
             
             <div className="p-5 overflow-y-auto space-y-8 flex-1">
               <div>
-                <h3 className="text-[15px] font-bold text-gray-900 mb-3">排序方式</h3>
+                <h3 className="text-[15px] font-bold text-gray-900 mb-3">{t('filter.sort')}</h3>
                 <div className="grid grid-cols-3 gap-2">
-                   <button onClick={() => setFilterSortBy('newest')} className={`py-2 rounded-xl text-[13px] font-medium border transition-all ${filterSortBy === 'newest' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>最新发布</button>
-                   <button onClick={() => setFilterSortBy('price_asc')} className={`py-2 rounded-xl text-[13px] font-medium border transition-all ${filterSortBy === 'price_asc' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>价格从低到高</button>
-                   <button onClick={() => setFilterSortBy('price_desc')} className={`py-2 rounded-xl text-[13px] font-medium border transition-all ${filterSortBy === 'price_desc' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>价格从高到低</button>
+                   <button onClick={() => setFilterSortBy('newest')} className={`py-2 rounded-xl text-[13px] font-medium border transition-all ${filterSortBy === 'newest' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>{t('filter.sort.newest')}</button>
+                   <button onClick={() => setFilterSortBy('price_asc')} className={`py-2 rounded-xl text-[13px] font-medium border transition-all ${filterSortBy === 'price_asc' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>{t('filter.sort.priceAsc')}</button>
+                   <button onClick={() => setFilterSortBy('price_desc')} className={`py-2 rounded-xl text-[13px] font-medium border transition-all ${filterSortBy === 'price_desc' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>{t('filter.sort.priceDesc')}</button>
                 </div>
               </div>
 
               <div>
-                <h3 className="text-[15px] font-bold text-gray-900 mb-3">房源类型</h3>
+                <h3 className="text-[15px] font-bold text-gray-900 mb-3">{t('filter.roomType')}</h3>
                 <div className="grid grid-cols-2 gap-3">
                   {['all', 'entire', '独立单间', '找室友', '沙发客'].map(type => {
-                    const label = type === 'all' ? '不限' : type === 'entire' ? '整套出租' : type;
+                    const labelMap: Record<string,string> = lang === 'en' ? { all: 'Any', entire: 'Entire Place', '独立单间': 'Private Room', '找室友': 'Flatmate', '沙发客': 'Couch Surfing' } : { all: '不限', entire: '整套出租', '独立单间': '独立单间', '找室友': '找室友', '沙发客': '沙发客' };
+                    const label = labelMap[type] || type;
                     const isActive = filterRoomType === type;
                     return (
                       <button key={type} onClick={() => setFilterRoomType(type)} className={`py-3 px-4 rounded-xl border text-left transition-all ${isActive ? 'bg-blue-50 border-blue-600 ring-1 ring-blue-600 shadow-sm' : 'bg-white border-gray-200 hover:border-blue-400'}`}>
@@ -591,7 +594,7 @@ export default function RoomsPage() {
               </div>
 
               <div>
-                <h3 className="text-[15px] font-bold text-gray-900 mb-3">核心设施要求</h3>
+                <h3 className="text-[15px] font-bold text-gray-900 mb-3">{t('filter.amenities')}</h3>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                   {baseFacilityOptions.map(option => {
                     const isActive = filterAmenities.includes(option.id);
@@ -600,7 +603,7 @@ export default function RoomsPage() {
                         <div className={`w-5 h-5 rounded flex items-center justify-center border transition-colors ${isActive ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 group-hover:border-blue-500'}`}>
                           {isActive && <svg fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"></path></svg>}
                         </div>
-                        <span className={`text-[14px] font-medium ${isActive ? 'text-gray-900' : 'text-gray-600'}`}>{option.label}</span>
+                        <span className={`text-[14px] font-medium ${isActive ? 'text-gray-900' : 'text-gray-600'}`}>{lang === 'en' ? option.labelEn : option.labelZh}</span>
                         <input type="checkbox" className="hidden" checked={isActive} onChange={() => toggleFilterAmenity(option.id)} />
                       </label>
                     );
@@ -614,13 +617,13 @@ export default function RoomsPage() {
                 onClick={() => { setFilterRoomType('all'); setFilterAmenities([]); setFilterSortBy('newest'); }}
                 className="text-[14px] font-bold text-gray-600 underline hover:text-gray-900"
               >
-                清除全部
+                {t('filter.clearAll')}
               </button>
               <button 
                 onClick={() => setIsFilterModalOpen(false)}
                 className="px-8 py-3.5 bg-gray-900 text-white rounded-xl font-bold text-[15px] shadow-lg hover:bg-black hover:-translate-y-0.5 transition-all"
               >
-                查看 {filteredRooms.length} 个房源
+                {lang === 'en' ? `Show ${filteredRooms.length} properties` : `查看 ${filteredRooms.length} 个房源`}
               </button>
             </div>
           </div>

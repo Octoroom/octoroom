@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
+import { useLanguage } from '@/lib/i18n';
 
 // --- 矢量图标库 ---
 const Icons = {
@@ -88,10 +89,12 @@ function RoomCardSlider({ images, roomCity, statusConf }: { images: string[], ro
 
 export default function MyBookingsPage() {
   const router = useRouter();
+  const { t, lang } = useLanguage();
   const [bookings, setBookings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   const [replyTexts, setReplyTexts] = useState<Record<string, string>>({});
+  const [refundingId, setRefundingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchMyBookings() {
@@ -111,18 +114,57 @@ export default function MyBookingsPage() {
   }, []);
 
   const handleStripePayment = async (bookingId: string) => {
-    alert("正在跳转至 Stripe 安全支付网关...");
-    await supabase.from('octo_bookings').update({ status: 'paid' }).eq('id', bookingId);
-    setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'paid' } : b));
+    try {
+      const booking = bookings.find(b => b.id === bookingId);
+      if (!booking) return;
+
+      const response = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookingId: bookingId,
+          roomTitle: booking.octo_rooms?.title,
+          price: booking.octo_rooms?.price,
+          hostId: booking.host_id,
+          customHostUrl: window.location.origin,
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert(t('alert.payFailed') + ": " + (data.error || 'Unknown error'));
+      }
+    } catch (err: any) {
+      alert(t('alert.payError') + ": " + err.message);
+    }
+  };
+
+  const handleRefund = async (bookingId: string) => {
+    if (!window.confirm(t('bookings.refund.confirm'))) return;
+    setRefundingId(bookingId);
+    try {
+      const res = await fetch('/api/stripe/refund', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookingId }) });
+      const data = await res.json();
+      if (data.success) {
+        alert(data.message || t('bookings.refund.success'));
+        setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'cancelled', payment_status: 'refunded' } : b));
+      } else {
+        alert(t('bookings.refund.failed') + ': ' + (data.message || data.error || 'Unknown'));
+      }
+    } catch { alert(t('bookings.refund.error')); }
+    finally { setRefundingId(null); }
   };
 
   const handleCancelBooking = async (bookingId: string) => {
-    if (!window.confirm("确定要取消这个预定吗？")) return;
+    if (!window.confirm(t('bookings.cancel.confirm'))) return;
     try {
       const { error } = await supabase.from('octo_bookings').update({ status: 'cancelled' }).eq('id', bookingId);
       if (error) throw error;
       setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'cancelled' } : b));
-    } catch (err: any) { alert("取消失败：" + err.message); }
+    } catch (err: any) { alert(t('alert.cancelFailed') + '：' + err.message); }
   };
 
   const handleSendReply = async (bookingId: string) => {
@@ -153,26 +195,26 @@ export default function MyBookingsPage() {
 
   const getStatusConfig = (status: string) => {
     switch (status) {
-      case 'paid': return { text: '预定已确认', badgeClass: 'bg-green-500/90 text-white border-green-400' };
-      case 'approved': return { text: '待付款', badgeClass: 'bg-orange-500/90 text-white border-orange-400' };
-      case 'rejected': return { text: '已婉拒', badgeClass: 'bg-red-500/90 text-white border-red-400' };
-      case 'cancelled': return { text: '已取消', badgeClass: 'bg-gray-500/90 text-white border-gray-400' };
-      default: return { text: '房东审核中', badgeClass: 'bg-blue-500/90 text-white border-blue-400' };
+      case 'paid': return { text: t('bookings.confirmed'), badgeClass: 'bg-green-500/90 text-white border-green-400' };
+      case 'approved': return { text: t('status.approved'), badgeClass: 'bg-orange-500/90 text-white border-orange-400' };
+      case 'rejected': return { text: t('status.rejected'), badgeClass: 'bg-red-500/90 text-white border-red-400' };
+      case 'cancelled': return { text: t('status.cancelled'), badgeClass: 'bg-gray-500/90 text-white border-gray-400' };
+      default: return { text: t('status.pending'), badgeClass: 'bg-blue-500/90 text-white border-blue-400' };
     }
   };
 
   return (
     <main className="flex-1 max-w-[640px] w-full min-h-screen border-r border-gray-100 bg-gray-50 flex flex-col relative">
       <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-100 sticky top-0 z-40">
-        <h1 className="text-xl font-black text-gray-900">我的预定</h1>
-        <button onClick={() => router.push('/rooms')} className="text-sm font-bold text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-full transition">去逛逛房源</button>
+        <h1 className="text-xl font-black text-gray-900">{t('bookings.title')}</h1>
+        <button onClick={() => router.push('/rooms')} className="text-sm font-bold text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-full transition">{t('bookings.browseRooms')}</button>
       </div>
 
       <div className="p-4 sm:p-6 flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
         ) : bookings.length === 0 ? (
-          <div className="text-center py-32 text-gray-400 font-medium">您还没有发起过任何预定申请</div>
+          <div className="text-center py-32 text-gray-400 font-medium">{t('bookings.empty')}</div>
         ) : (
           <div className="flex flex-col gap-8">
             {bookings.map(booking => {
@@ -191,7 +233,7 @@ export default function MyBookingsPage() {
                     <div className="flex items-center justify-between bg-gray-50/80 px-3 py-2.5 rounded-xl mb-4 border border-gray-100">
                       <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500">
                         <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        下单时间：{new Date(booking.created_at).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(/\//g, '-')}
+                        {lang === 'en' ? 'Booked: ' : '下单时间：'}{new Date(booking.created_at).toLocaleString(lang === 'en' ? 'en-NZ' : 'zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(/\//g, '-')}
                       </div>
                       <div className="text-[10px] font-mono font-bold text-gray-400 bg-white px-2 py-0.5 rounded-md border border-gray-100 shadow-sm">
                         ID: {booking.id.split('-')[0].toUpperCase()}
@@ -200,7 +242,7 @@ export default function MyBookingsPage() {
 
                     <div onClick={() => router.push(`/rooms/${booking.room_id}`)} className="cursor-pointer group mb-2">
                       <div className="text-[12px] font-bold text-gray-400 mb-1.5 flex items-center gap-1.5">
-                        {room?.room_type || '独立单间'} <span className="w-1 h-1 rounded-full bg-gray-300"></span> {room?.rent_mode === 'entire' ? '整套出租' : '按房间出租'}
+                        {lang === 'en' ? (room?.room_type === '独立单间' ? 'Private Room' : room?.room_type || 'Private Room') : (room?.room_type || '独立单间')} <span className="w-1 h-1 rounded-full bg-gray-300"></span> {lang === 'en' ? (room?.rent_mode === 'entire' ? 'Entire Place' : 'Per Room') : (room?.rent_mode === 'entire' ? '整套出租' : '按房间出租')}
                       </div>
                       <h2 className="text-[18px] font-black text-gray-900 group-hover:text-blue-600 transition-colors line-clamp-1 mb-1">{room?.title}</h2>
                       
@@ -208,7 +250,7 @@ export default function MyBookingsPage() {
                         <div className="flex flex-wrap items-center gap-2 mt-2 mb-3 text-gray-400">
                            {room.amenities.split(',').map((s:string)=>s.trim()).filter(Boolean).slice(0, 5).map((item: string) => {
                               const Icon = Icons[item as keyof typeof Icons];
-                              const label = item === 'wifi' ? 'Wi-Fi' : item === 'ac' ? '空调' : item === 'kitchen' ? '厨房' : item === 'washer' ? '洗衣机' : item === 'bathroom' ? '独立卫浴' : item === 'workspace' ? '工作区' : item;
+                              const label = item === 'wifi' ? 'Wi-Fi' : item === 'ac' ? t('amenity.ac') : item === 'kitchen' ? t('amenity.kitchen') : item === 'washer' ? t('amenity.washer') : item === 'bathroom' ? t('amenity.bathroom') : item === 'workspace' ? t('amenity.workspace') : item;
                               return Icon ? (
                                 <div key={item} className="flex items-center gap-1 bg-gray-50 border border-gray-100 px-2 py-0.5 rounded text-[10px] font-medium" title={item}>
                                   <div className="w-3 h-3 text-gray-400">{Icon}</div>
@@ -218,7 +260,7 @@ export default function MyBookingsPage() {
                            })}
                         </div>
                       )}
-                      <div className="text-[16px] font-black text-blue-600">{room?.price?.includes('晚') ? room.price : `${room?.price || '面议'} / 晚`}</div>
+                      <div className="text-[16px] font-black text-blue-600">{room?.price?.includes('晚') ? room.price : `${room?.price || t('rooms.negotiate')} ${t('rooms.perNight')}`}</div>
                     </div>
 
                     <div className="w-full h-px bg-gray-100 my-4"></div>
@@ -227,17 +269,17 @@ export default function MyBookingsPage() {
                       <div className="flex flex-col gap-1">
                         <div className="text-[13px] font-bold text-gray-800 flex items-center gap-1.5">
                            <svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-gray-400"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" /></svg>
-                           {new Date(booking.check_in).toLocaleDateString()} 至 {new Date(booking.check_out).toLocaleDateString()}
+                           {new Date(booking.check_in).toLocaleDateString(lang === 'en' ? 'en-NZ' : undefined)} {t('bookings.to')} {new Date(booking.check_out).toLocaleDateString(lang === 'en' ? 'en-NZ' : undefined)}
                         </div>
                         <div className="text-[12px] text-gray-500 font-medium ml-5.5">
-                           共 {nights} 晚 · 预定 {booking.room_count || 1} 间房
+                           {lang === 'en' ? `${nights} nights · ${booking.room_count || 1} rooms` : `共 ${nights} 晚 · 预定 ${booking.room_count || 1} 间房`}
                         </div>
                       </div>
 
                       <div onClick={() => router.push(`/user/${booking.host_id}`)} className="flex items-center gap-2.5 cursor-pointer hover:bg-gray-50 p-1.5 rounded-xl transition-colors">
                         <div className="flex flex-col items-end">
-                          <span className="text-[10px] font-bold text-gray-400">房东联系人</span>
-                          <span className="text-[12px] font-bold text-gray-700 max-w-[80px] truncate">{room?.author_name || '神秘房东'}</span>
+                          <span className="text-[10px] font-bold text-gray-400">{t('bookings.host')}</span>
+                          <span className="text-[12px] font-bold text-gray-700 max-w-[80px] truncate">{room?.author_name || (lang === 'en' ? 'Host' : '神秘房东')}</span>
                         </div>
                         <img src={room?.author_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${booking.host_id}`} className="w-9 h-9 rounded-full object-cover bg-gray-100 border border-gray-200" alt="host" />
                       </div>
@@ -246,13 +288,13 @@ export default function MyBookingsPage() {
                     <div className="bg-gray-50/50 rounded-2xl border border-gray-100 mt-2 flex flex-col overflow-hidden">
                       <div className="px-4 py-3 border-b border-gray-100 font-bold text-[13px] text-gray-700 flex items-center gap-2 bg-white/50">
                         <svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-blue-500"><path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" /></svg>
-                        订单沟通记录
+                        {t('bookings.chat')}
                       </div>
                       
                       <div className="p-4 flex flex-col gap-4 max-h-[260px] overflow-y-auto">
                         {booking.guest_message && (
                           <div className="flex flex-col items-end">
-                            <span className="text-[10px] font-bold text-gray-400 mb-1">我的申请留言</span>
+                            <span className="text-[10px] font-bold text-gray-400 mb-1">{t('bookings.myMessage')}</span>
                             <div className="bg-blue-600 text-white text-[13px] py-2 px-3.5 rounded-2xl rounded-tr-sm max-w-[85%] leading-relaxed shadow-sm">
                               {booking.guest_message}
                             </div>
@@ -264,7 +306,7 @@ export default function MyBookingsPage() {
                           return (
                             <div key={idx} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                               <span className="text-[10px] font-bold text-gray-400 mb-1">
-                                {isMe ? '我' : '房东回复'} · {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                {isMe ? (lang === 'en' ? 'Me' : '我') : (lang === 'en' ? 'Host' : '房东回复')} · {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                               </span>
                               <div className={`${isMe ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm'} text-[13px] py-2 px-3.5 rounded-2xl max-w-[85%] leading-relaxed shadow-sm`}>
                                 {msg.text}
@@ -279,7 +321,7 @@ export default function MyBookingsPage() {
                           value={replyTexts[booking.id] || ''} 
                           onChange={(e) => setReplyTexts(prev => ({...prev, [booking.id]: e.target.value}))}
                           onKeyDown={(e) => e.key === 'Enter' && handleSendReply(booking.id)}
-                          placeholder="继续给房东留言..." 
+                          placeholder={t('bookings.chatPlaceholder')} 
                           className="flex-1 bg-gray-50 border border-gray-200 rounded-full px-4 py-2 text-[13px] outline-none focus:ring-2 focus:ring-blue-500/20 transition-all" 
                         />
                         <button 
@@ -295,7 +337,7 @@ export default function MyBookingsPage() {
                     {booking.status === 'pending' && (
                       <div className="mt-4 flex justify-end">
                         <button onClick={() => handleCancelBooking(booking.id)} className="px-5 py-2 rounded-xl text-[13px] font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 hover:text-red-500 transition">
-                          取消申请
+                          {t('bookings.cancelApply')}
                         </button>
                       </div>
                     )}
@@ -304,17 +346,39 @@ export default function MyBookingsPage() {
                       <div className="mt-4">
                         <div className="text-xs text-green-600 font-bold mb-3 flex items-center gap-1.5">
                           <svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                          房东已同意您的申请，请尽快付款锁定房源：
+                          {t('bookings.ownerApproved')}
                         </div>
+                        {(() => { const cp = room?.cancellation_policy || 'standard'; const pl:Record<string,string> = lang === 'en' ? { flexible: 'Flexible (Full refund up to 3 days before check-in)', standard: 'Standard (Full refund up to 7 days before check-in)', strict: 'Strict (Full refund up to 14 days before check-in)' } : { flexible: '灵活 (入住前3天可全额退款)', standard: '标准 (入住前7天可全额退款)', strict: '严格 (入住前14天可全额退款)' }; return (
+                          <div className="bg-amber-50 border border-amber-100 rounded-xl px-3 py-2.5 mb-3 flex items-start gap-2">
+                            <svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
+                            <div><div className="text-[11px] font-bold text-amber-700">{t('bookings.refundPolicy')}: {pl[cp] || cp}</div><div className="text-[10px] text-amber-600 mt-0.5">{t('bookings.refundPolicy.grace')}</div></div>
+                          </div>); })()}
+                        <div className="text-[10px] text-gray-400 mb-2 flex items-center gap-1"><svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>{t('bookings.refundPolicy.agree')}</div>
                         <div className="flex gap-2">
                           <button onClick={() => handleCancelBooking(booking.id)} className="px-5 py-3.5 rounded-xl font-bold text-[14px] bg-gray-100 text-gray-500 hover:bg-gray-200 transition flex-shrink-0">
-                            取消预定
+                            {t('bookings.cancel')}
                           </button>
                           <button onClick={() => handleStripePayment(booking.id)} className="flex-1 py-3.5 rounded-xl font-black text-[14px] bg-gray-900 text-white shadow-md hover:-translate-y-0.5 transition-all flex items-center justify-center gap-2">
-                            <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M12 2C6.477 2 2 6.477 2 12c0 5.523 4.477 10 10 10s10-4.477 10-10c0-5.523-4.477-10-10-10zm2.25 14v-1.5h-1.5v1.5H12v-1.5h-.75V11.5H12v-1.5h1.5v1.5h1.5A1.5 1.5 0 0016.5 10v-1c0-.827-.673-1.5-1.5-1.5h-3A.5.5 0 0111.5 7V5.5h-1.5V7H9v1.5h1.5v1.5H9A1.5 1.5 0 007.5 11.5v1c0 .827.673 1.5 1.5 1.5h3a.5.5 0 01.5.5v2h1.5v-2h1.5v2h.75z"/></svg>
-                            立即支付
+                            <svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>
+                            {t('bookings.pay')}
                           </button>
                         </div>
+                      </div>
+                    )}
+
+                    {booking.status === 'paid' && booking.payment_status === 'held' && (
+                      <div className="mt-4 bg-blue-50 border border-blue-100 rounded-2xl p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-[13px] font-bold text-blue-800 flex items-center gap-1.5"><svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m0-3a7.5 7.5 0 11-15 0 7.5 7.5 0 0115 0z" /></svg>{t('bookings.paid.held')}</div>
+                          <div className="text-[10px] text-blue-500 font-medium">{t('bookings.paid.auto')}</div>
+                        </div>
+                        {(() => { const cp = booking.cancellation_policy || 'standard'; const pw:Record<string,number> = { flexible:3, standard:7, strict:14 }; const days = pw[cp]||7; const ci = new Date(booking.check_in); const dl = new Date(ci.getTime() - days*24*3600*1000); const now = new Date(); const canRefund = now < dl; return (
+                          <div className="flex items-center justify-between">
+                            <div className="text-[11px] text-blue-600">{canRefund ? `${dl.toLocaleDateString(lang === 'en' ? 'en-NZ' : 'zh-CN')}${t('bookings.refund.before')}` : t('bookings.refund.expired')}</div>
+                            <button onClick={() => handleRefund(booking.id)} disabled={!canRefund || refundingId === booking.id} className={`px-4 py-2 rounded-lg text-[12px] font-bold transition-all flex items-center gap-1.5 ${canRefund ? 'bg-white text-red-500 border border-red-200 hover:bg-red-50 shadow-sm' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+                              {refundingId === booking.id ? <><div className="w-3 h-3 border-2 border-red-300 border-t-red-500 rounded-full animate-spin"></div>{t('bookings.refund.processing')}</> : <><svg fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>{canRefund ? t('bookings.refund.apply') : t('bookings.refund.unavailable')}</>}
+                            </button>
+                          </div>); })()}
                       </div>
                     )}
                   </div>

@@ -7,6 +7,7 @@ import InsforgeProviderWrapper from "@/components/InsforgeProviderWrapper";
 import Sidebar from "@/components/Sidebar"; 
 import PhotoAlbumFeed from "@/components/PhotoAlbumFeed"; 
 import PopularRoomsFeed from "@/components/PopularRoomsFeed"; 
+import { LanguageProvider } from "@/lib/i18n";
 // 🌟 引入刚建好的移动端导航组件
 import MobileNav from "@/components/MobileNav"; 
 
@@ -26,9 +27,9 @@ export default function RootLayout({
     <html lang="zh-CN">
       <body className={inter.className}>
         <InsforgeProviderWrapper>
-          
-          {/* 🌟 核心修改 1：加上了 lg:pl-[140px] 2xl:pl-[280px] */}
-          <div className="flex justify-center min-h-screen bg-white md:bg-octo-cream lg:pl-[140px] 2xl:pl-[280px]">
+          <LanguageProvider>
+          {/* 🌟 核心修改 1：同步侧边栏宽度，加上了 lg:pl-[280px] */}
+          <div className="flex justify-center min-h-screen bg-white md:bg-octo-cream lg:pl-[280px]">
             
             {/* 🌟 核心修改 2：主容器稍微放大到 max-w-[1600px] 避免四列内容互相挤压 */}
             <div className="flex w-full max-w-[1600px] justify-center lg:justify-between gap-4 xl:gap-6 relative">
@@ -36,9 +37,9 @@ export default function RootLayout({
               {/* 第一列 (左侧)：全局侧边栏 */}
               {/* 🌟 核心修改：加上 hidden md:block，在手机端隐藏原本固定的侧边栏 */}
               {/* 第一列 (左侧)：全局侧边栏 */}
-<div className="hidden md:block w-[240px] sticky top-0 h-screen border-r border-gray-100">
-  <Sidebar />
-</div>
+              <div className="hidden md:block w-[280px] sticky top-0 h-screen border-r border-gray-100">
+                <Sidebar />
+              </div>
 
               {/* 第二列 (中间)：动态内容区 */}
               <main className="w-full max-w-[600px] min-h-screen bg-white border-x border-gray-100 shadow-sm relative shrink-0 flex flex-col">
@@ -70,6 +71,7 @@ export default function RootLayout({
 
           </div>
           
+          </LanguageProvider>
         </InsforgeProviderWrapper>
       </body>
     </html>
