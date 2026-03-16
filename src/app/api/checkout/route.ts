@@ -3,23 +3,26 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '');
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 export async function POST(req: Request) {
   try {
+    // 1. Fail early at runtime if Stripe isn't configured, rather than crashing the build
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return NextResponse.json({ error: 'Stripe is not configured' }, { status: 500 });
+    }
+
+    // 2. Initialize Stripe INSIDE the handler
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+    // 3. Initialize Supabase INSIDE the handler to prevent similar build-time crashes
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
     const { bookingId, roomTitle, price, hostId, customHostUrl } = await req.json();
 
     if (!bookingId || !price) {
       return NextResponse.json({ error: 'Missing bookingId or price' }, { status: 400 });
-    }
-
-    if (!process.env.STRIPE_SECRET_KEY) {
-      return NextResponse.json({ error: 'Stripe is not configured' }, { status: 500 });
     }
 
     // Parse price (e.g., "150 NZD / 晚" -> 15000 cents)
@@ -33,7 +36,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Invalid price' }, { status: 400 });
     }
 
-    // Look up the host's stripe_account_id for metadata (used later during payout)
+    // Look up the host's stripe_account_id for metadata
     let hostStripeAccountId = '';
     if (hostId) {
       const { data: { user: hostUser } } = await supabaseAdmin.auth.admin.getUserById(hostId);
@@ -43,7 +46,6 @@ export async function POST(req: Request) {
     const origin = req.headers.get('origin') || customHostUrl || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
     // Platform escrow: NO transfer_data — funds stay on the platform account
-    // We record hostStripeAccountId in metadata for later payout
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card', 'alipay', 'wechat_pay'],
       payment_method_options: {
