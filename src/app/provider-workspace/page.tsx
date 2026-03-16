@@ -1,477 +1,359 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 // --- 🌟 Types & Interfaces ---
-type WorkspaceTab = 'DEALS' | 'CRM' | 'DOCUMENTS' | 'PROVIDERS';
-type DealStatus = 'NEGOTIATION' | 'CONDITIONAL' | 'UNCONDITIONAL' | 'SETTLED';
-type ConditionStatus = 'PENDING' | 'WAITING' | 'MET' | 'FAILED';
+type ProviderStatus = 'WORKING' | 'PENDING' | 'LOOKING' | 'DONE';
 
 interface Condition {
   id: string;
   name: string;
   dueDate: string;
-  status: ConditionStatus;
+  status: 'PENDING' | 'WAITING' | 'MET' | 'FAILED';
 }
 
-interface Customer {
+interface ActivityLog {
+  id: string;
+  type: 'CALL' | 'VIEWING' | 'EMAIL' | 'OFFER' | 'NOTE';
+  content: string;
+  timestamp: string;
+  agentName: string;
+}
+
+interface Buyer {
   id: string;
   name: string;
   email: string;
   phone: string;
-  type: 'BUYER' | 'SELLER';
-  status: 'ACTIVE' | 'ARCHIVED';
-  lastActivity: string;
+  maxBudget: string;
+  financeStatus: 'CASH' | 'CONDITIONAL' | 'UNAPPROVED';
+  status: ProviderStatus;
+  conditions: Condition[];
+  offerHistory: {
+    status: 'DRAFT' | 'SENT' | 'INITIALED' | 'NEGOTIATING' | 'ACCEPTED';
+    date: string;
+    price: string;
+  }[];
+  lastFollowUp: string;
+  nextAction: string;
+  roleDescription?: string;
+  company?: string;
 }
 
-interface Document {
+interface ManagedProperty {
   id: string;
-  title: string;
-  type: 'S&P' | 'DISCLOSURE' | 'CONSENT' | 'OTHER';
-  status: 'DRAFT' | 'SENT' | 'SIGNED' | 'EXPIRED';
-  customerName: string;
-  updatedAt: string;
-}
-
-interface Deal {
-  id: string;
-  propertyId: string;
   address: string;
   vendor: string;
-  purchaser: string;
-  price: string;
-  deposit: string;
-  status: DealStatus;
-  conditions: Condition[];
-  lawyerName: string;
-  lawyerEmail: string;
-  updatedAt: string;
+  image: string;
+  status: 'ACTIVE' | 'SOLD' | 'WITHDRAWN';
+  activeBuyers: number;
+  scheduledViewings: number;
+  themeColor: string;
 }
 
-// --- 🎨 Premium UI Components ---
+// --- 🎨 Components from Providers Page Style ---
+function CategoryIcon({ id, className = "w-4 h-4" }: { id: string, className?: string }) {
+  switch (id) {
+    case 'PROPERTIES':
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+        </svg>
+      );
+    case 'BUYERS':
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+      );
+    case 'STATS':
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
 
-function StatusBadge({ status }: { status: DealStatus }) {
-  const configs = {
-    NEGOTIATION: { text: '谈判中 (Offer Stage)', color: 'bg-blue-100 text-blue-700 border-blue-200' },
-    CONDITIONAL: { text: '有条件 (Conditional)', color: 'bg-amber-100 text-amber-700 border-amber-200' },
-    UNCONDITIONAL: { text: '无条件 (Unconditional)', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-    SETTLED: { text: '已交割 (Settled)', color: 'bg-gray-100 text-gray-700 border-gray-200' },
+function MondayStatusBadge({ status }: { status: ProviderStatus }) {
+  const statusConfig = {
+    WORKING: { text: '服务中', color: 'bg-[#00c875] text-white' }, 
+    DONE: { text: '已完成', color: 'bg-[#0086c0] text-white' }, 
+    PENDING: { text: '待确认', color: 'bg-[#fdab3d] text-white' }, 
+    LOOKING: { text: '寻找中', color: 'bg-[#c4c4c4] text-white' }, 
   };
-  const config = configs[status];
+
+  const config = statusConfig[status];
+
   return (
-    <span className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-tight border ${config.color}`}>
+    <div className={`flex items-center justify-center w-[72px] h-[30px] rounded-[4px] text-[12px] font-bold tracking-wide shadow-sm transition-all hover:opacity-90 cursor-pointer ${config.color}`}>
       {config.text}
-    </span>
-  );
-}
-
-function ConditionItem({ condition }: { condition: Condition }) {
-  const statusColors = {
-    PENDING: 'bg-gray-200',
-    WAITING: 'bg-blue-400 animate-pulse',
-    MET: 'bg-emerald-500',
-    FAILED: 'bg-rose-500',
-  };
-
-  return (
-    <div className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-      <div className="flex items-center gap-3">
-        <div className={`w-2 h-2 rounded-full ${statusColors[condition.status]}`} />
-        <span className="text-[13px] font-bold text-gray-700">{condition.name}</span>
-      </div>
-      <div className="text-right">
-        <p className="text-[11px] font-medium text-gray-400">Due: {condition.dueDate}</p>
-        <p className={`text-[10px] font-black ${condition.status === 'MET' ? 'text-emerald-600' : 'text-gray-500'}`}>
-          {condition.status === 'MET' ? '✓ 已满足' : '进行中'}
-        </p>
-      </div>
     </div>
   );
 }
 
-export default function AgentWorkspacePage() {
-  const router = useRouter();
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>('DEALS');
-  const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
-  const [targetPropertyId] = useState('17419957-de38-4e16-ba44-3fadf6c468c1'); // 110 Tihi Street
-  
-  const [userRole, setUserRole] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+// --- 📊 Mock Data ---
+const MOCKED_PROPERTIES: ManagedProperty[] = [
+  {
+    id: '17419957-de38-4e16-ba44-3fadf6c468c1',
+    address: '110 Tihi Street, Stonefields',
+    vendor: 'John & Jane Doe',
+    image: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80',
+    status: 'ACTIVE',
+    activeBuyers: 4,
+    scheduledViewings: 12,
+    themeColor: '#ff7575',
+  }
+];
 
-  // CRM & Document States
-  const [customers, setCustomers] = useState<Customer[]>([
-    { id: 'cust1', name: 'Alice Johnson', email: 'alice@example.com', phone: '021 000 1111', type: 'BUYER', status: 'ACTIVE', lastActivity: '2h ago' },
-    { id: 'cust2', name: 'Bob Smith', email: 'bob@example.com', phone: '022 111 2222', type: 'BUYER', status: 'ACTIVE', lastActivity: '1d ago' },
-    { id: 'cust3', name: 'Charlie Davis', email: 'charlie@example.com', phone: '027 333 4444', type: 'SELLER', status: 'ACTIVE', lastActivity: '5h ago' },
-  ]);
-
-  const [documents, setDocuments] = useState<Document[]>([
-    { id: 'doc1', title: 'S&P Agreement - 110 Tihi Street', type: 'S&P', status: 'SIGNED', customerName: 'Alice Johnson', updatedAt: '2h ago' },
-    { id: 'doc2', title: 'Bright-line Disclosure', type: 'DISCLOSURE', status: 'SENT', customerName: 'Alice Johnson', updatedAt: '3h ago' },
-    { id: 'doc3', title: 'Client Consent Form', type: 'CONSENT', status: 'DRAFT', customerName: 'Bob Smith', updatedAt: 'Yesterday' },
-  ]);
-
-  // Offer Form States
-  const [selectedCustomerId, setSelectedCustomerId] = useState('');
-  const [purchaserName, setPurchaserName] = useState('');
-  const [offerPrice, setOfferPrice] = useState('');
-  const [settlementDate, setSettlementDate] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    const checkRole = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-      setUserRole(profile?.role || 'BUYER');
-      setLoading(false);
-    };
-
-    checkRole();
-  }, []);
-
-  useEffect(() => {
-    // When a customer is selected, auto-fill the purchaser name
-    const customer = customers.find(c => c.id === selectedCustomerId);
-    if (customer) {
-      setPurchaserName(customer.name);
-    }
-  }, [selectedCustomerId, customers]);
-
-  // 模拟成交数据 (Real NZ Context)
-  const deals: Deal[] = [
+const MOCKED_PIPELINE: Record<string, Buyer[]> = {
+  '17419957-de38-4e16-ba44-3fadf6c468c1': [
     {
-      id: 'd1',
-      propertyId: targetPropertyId,
-      address: '110 Tihi Street, Stonefields',
-      vendor: 'Current Owner',
-      purchaser: 'Alice & Bob Johnson',
-      price: '$1,850,000',
-      deposit: '$185,000 (Pending)',
-      status: 'CONDITIONAL',
-      lawyerName: 'Jessica Chen',
-      lawyerEmail: 'jessica.chen.law@octoroom.com',
-      updatedAt: '2小时前',
+      id: 'b1',
+      name: 'Alice Johnson',
+      email: 'alice.j@example.com',
+      phone: '021 123 4567',
+      maxBudget: '$1,950,000',
+      financeStatus: 'CONDITIONAL',
+      status: 'WORKING',
+      roleDescription: 'Cash Buyer (Approved)',
+      company: 'Auckland Real Estate Investors',
       conditions: [
-        { id: 'c1', name: 'Finance (贷款条件)', dueDate: '3月25日', status: 'WAITING' },
-        { id: 'c2', name: 'Building Report (屋检)', dueDate: '3月20日', status: 'MET' },
-        { id: 'c3', name: 'LIM Report (土地报告)', dueDate: '3月30日', status: 'PENDING' },
-      ]
+        { id: 'c1', name: 'Finance', dueDate: '2026-03-25', status: 'WAITING' },
+        { id: 'c2', name: 'Building', dueDate: '2026-03-20', status: 'MET' }
+      ],
+      offerHistory: [{ status: 'NEGOTIATING', date: '2h ago', price: '$1,850,000' }],
+      lastFollowUp: 'Today, 10:00 AM',
+      nextAction: 'Follow up on finance letter'
     },
     {
-      id: 'd2',
-      propertyId: 'other-id',
-      address: '15/22 Albert Street, Auckland CBD',
-      vendor: 'H. Zhang',
-      purchaser: 'First Home Buyer Ltd',
-      price: '$680,000',
-      deposit: '$68,000 (Paid)',
-      status: 'UNCONDITIONAL',
-      lawyerName: 'Mark Wilson',
-      lawyerEmail: 'mark@wilsonlegal.co.nz',
-      updatedAt: '昨天 15:30',
-      conditions: [
-        { id: 'c4', name: 'All Conditions Met', dueDate: '-', status: 'MET' }
-      ]
+      id: 'b2',
+      name: 'David Chen',
+      email: 'david.c@example.com',
+      phone: '022 987 6543',
+      maxBudget: '$1,800,000',
+      financeStatus: 'CASH',
+      status: 'PENDING',
+      roleDescription: 'First Home Buyer',
+      company: 'Tech Professionals Coop',
+      conditions: [],
+      offerHistory: [{ status: 'SENT', date: 'Yesterday', price: '$1,780,000' }],
+      lastFollowUp: 'Yesterday, 3:30 PM',
+      nextAction: 'Private viewing scheduled for Sat'
     }
-  ];
+  ]
+};
 
-  const handleInitiateOffer = () => {
-    if (!purchaserName || !offerPrice || !settlementDate) {
-      alert('请填入基本出价信息');
-      return;
+const MOCKED_ACTIVITY: Record<string, ActivityLog[]> = {
+  'b1': [
+    { id: 'a1', type: 'CALL', content: 'Discussed finance status. Bank letter expected by Friday.', timestamp: 'today 10:00 AM', agentName: 'Jerry Agent' },
+  ]
+};
+
+export default function AgentWorkspacePage() {
+  const router = useRouter();
+  const [selectedPropertyId, setSelectedPropertyId] = useState(MOCKED_PROPERTIES[0].id);
+  const [selectedBuyerId, setSelectedBuyerId] = useState<string | null>(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [isAuthorizing, setIsAuthorizing] = useState(true);
+
+  const currentProperty = MOCKED_PROPERTIES.find(p => p.id === selectedPropertyId)!;
+  const pipeline = MOCKED_PIPELINE[selectedPropertyId] || [];
+  const selectedBuyer = pipeline.find(b => b.id === selectedBuyerId);
+  const activities = selectedBuyerId ? (MOCKED_ACTIVITY[selectedBuyerId] || []) : [];
+
+  useEffect(() => {
+    async function checkAuth() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setIsAuthorizing(false);
+        return;
+      }
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+      setUserRole(profile?.role || null);
+      setIsAuthorizing(false);
     }
-    
-    setIsSubmitting(true);
-    
-    const offerTerms = {
-      purchaserName,
-      offerPrice: Number(offerPrice),
-      financeType: 'finance',
-      financeDays: 15,
-      deposit: 10,
-      conditions: { lim: 15, building: 15, toxicology: false },
-      settlementDate,
-    };
+    checkAuth();
+  }, []);
 
-    sessionStorage.setItem(`offer_terms_${targetPropertyId}`, JSON.stringify(offerTerms));
-    router.push(`/contract/${targetPropertyId}`);
-  };
+  if (isAuthorizing) return <div className="min-h-screen bg-[#f5f6f8] flex items-center justify-center font-bold text-gray-400">Loading Workspace...</div>;
 
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">Loading Workspace...</div>;
+  if (userRole?.toLowerCase() !== 'agent' && userRole?.toLowerCase() !== 'admin') {
+    return (
+      <div className="min-h-screen bg-[#f5f6f8] flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-white rounded-xl shadow-sm p-8 text-center border border-gray-200">
+          <h1 className="text-[18px] font-black text-gray-900 mb-2">Agent Access Only</h1>
+          <button onClick={() => router.push('/')} className="mt-4 px-6 py-2 bg-gray-800 text-white font-bold rounded-lg hover:bg-black transition-colors">
+            Return to Homepage
+          </button>
+        </div>
+      </div>
+    );
   }
 
-  // If user is not an AGENT, show a blank or simplified view as requested
-  if (userRole !== 'AGENT') {
-    return (
-      <main className="flex-1 max-w-[640px] w-full min-h-screen border-r border-gray-100 bg-white flex flex-col relative mx-auto p-8 items-center justify-center text-center">
-        <div className="w-20 h-20 bg-gray-50 rounded-3xl flex items-center justify-center mb-6 text-3xl">🏜️</div>
-        <h2 className="text-xl font-black text-gray-900 mb-2">Workspace Unavailable</h2>
-        <p className="text-gray-400 font-bold text-sm">此工作台仅对持牌代理 (Licensed Agent) 开放。<br/>如果您是房东或买家，请前往房源中�  return (
-    <main className="flex-1 max-w-[900px] w-full min-h-screen border-r border-gray-100 bg-[#F8FAFC] flex flex-col relative mx-auto font-sans tracking-tight">
+  return (
+    <div className="flex-1 max-w-[640px] w-full min-h-screen border-r border-gray-100 bg-[#f5f6f8] flex flex-col relative mx-auto font-sans">
       
-      {/* 🏙️ Property Executive Summary */}
-      <section className="bg-white border-b border-gray-100 p-8 pt-10 sticky top-0 z-40 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-6">
-            <div className="w-20 h-20 rounded-[32px] overflow-hidden shadow-2xl border-4 border-white">
-              <img src="https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=400&q=80" alt="property" className="w-full h-full object-cover" />
+      {/* 顶部导航 (Providers Page Style) */}
+      <div className="bg-white px-4 py-4 border-b border-gray-100 sticky top-0 z-30 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button onClick={() => router.back()} className="p-2 -ml-2 hover:bg-gray-50 rounded-full transition-colors">
+            <svg className="w-5 h-5 text-gray-900" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div>
+            <h1 className="text-[18px] font-black text-gray-900 leading-tight">代理商工作台</h1>
+            <p className="text-[12px] text-gray-500 font-medium mt-0.5">管理您的房产管道与买家</p>
+          </div>
+        </div>
+        <button className="bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-blue-700 shadow-sm transition-transform active:scale-95">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+        </button>
+      </div>
+
+      <div className="p-4 space-y-8 pb-28">
+        {/* --- Featured Property Section --- */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2 mb-1 pl-1">
+            <div className="w-[22px] h-[22px] rounded-[6px] bg-[#ff7575] flex items-center justify-center shadow-sm text-white">
+              <CategoryIcon id="PROPERTIES" className="w-3.5 h-3.5" />
             </div>
-            <div>
-              <div className="flex items-center gap-3 mb-1">
-                <h1 className="text-3xl font-black text-gray-900">{property.address}</h1>
-                <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-[11px] font-black rounded-full uppercase tracking-widest border border-emerald-100">Live Pipeline</span>
-              </div>
-              <p className="text-gray-400 font-bold text-[14px] uppercase tracking-wider">{property.suburb} · <span className="text-gray-900 font-black">{property.askingPrice}</span></p>
+            <h2 className="text-[15px] font-black text-[#ff7575]">当前房源</h2>
+            <span className="text-gray-400 text-xs ml-1 font-medium">1</span>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="flex items-center gap-3 p-4">
+               <div className="w-1.5 h-12 rounded-full shrink-0 bg-[#ff7575]" />
+               <div className="w-16 h-16 rounded-lg bg-cover bg-center shrink-0 border border-gray-100" style={{ backgroundImage: `url(${currentProperty.image})` }} />
+               <div className="flex-1 truncate">
+                  <h3 className="text-[16px] font-black text-gray-900 truncate">{currentProperty.address}</h3>
+                  <p className="text-[12px] font-bold text-gray-400 mt-0.5">Vendor: {currentProperty.vendor}</p>
+               </div>
+               <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded-lg border border-gray-100 shrink-0">
+                  <CategoryIcon id="STATS" className="w-3.5 h-3.5 text-gray-400" />
+                  <span className="text-[12px] font-black text-gray-600">{currentProperty.activeBuyers} Buyers</span>
+               </div>
             </div>
           </div>
-          <div className="flex gap-2">
-            <button className="h-12 px-6 bg-gray-50 text-gray-900 font-black text-sm rounded-2xl border border-gray-100 hover:bg-white hover:shadow-lg transition-all">Property Assets</button>
-            <button className="h-12 w-12 bg-black text-white flex items-center justify-center rounded-2xl hover:scale-110 transition-transform active:scale-95 shadow-lg shadow-black/10">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
-            </button>
-          </div>
-        </div>
-        
-        <div className="grid grid-cols-3 gap-6 mt-10">
-          <div className="p-5 rounded-3xl bg-[#F8FAFC] border border-gray-50">
-            <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Managed Pipeline</p>
-            <p className="text-2xl font-black text-gray-900">{property.buyerCount} Active Buyers</p>
-          </div>
-          <div className="p-5 rounded-3xl bg-[#F8FAFC] border border-gray-100">
-            <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Highest Offer</p>
-            <p className="text-2xl font-black text-emerald-600">$1,850,000</p>
-          </div>
-          <div className="p-5 rounded-3xl bg-indigo-50 border border-indigo-100">
-            <p className="text-[11px] font-black text-indigo-400 uppercase tracking-widest mb-1.5">Avg. Conversion Time</p>
-            <p className="text-2xl font-black text-indigo-700">14.2 Days</p>
-          </div>
-        </div>
-      </section>
-
-      {/* 📊 Comparison Table: The Pipeline Engine */}
-      <section className="p-8 pb-32">
-        <div className="flex items-center justify-between mb-8">
-          <h2 className="text-xl font-black text-gray-900 tracking-tight flex items-center gap-3">
-            Buyer Pipeline Analysis
-            <span className="w-2 h-2 bg-orange-400 rounded-full animate-ping" />
-          </h2>
-          <div className="flex items-center gap-4 text-xs font-bold text-gray-400">
-            <span>Filter: High Budget</span>
-            <span className="w-px h-3 bg-gray-200" />
-            <span>Sort: Last Follow-up</span>
-          </div>
         </div>
 
-        <div className="bg-white rounded-[40px] shadow-2xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-[#F8FAFC] border-b border-gray-50">
-                <th className="px-6 py-5 text-[11px] font-black text-gray-400 uppercase tracking-tighter">Candidate / Buyer</th>
-                <th className="px-6 py-5 text-[11px] font-black text-gray-400 uppercase tracking-tighter">Budget Capacity</th>
-                <th className="px-6 py-5 text-[11px] font-black text-gray-400 uppercase tracking-tighter">Finance / conditions</th>
-                <th className="px-6 py-5 text-[11px] font-black text-gray-400 uppercase tracking-tighter">Engagement</th>
-                <th className="px-6 py-5 text-[11px] font-black text-gray-400 uppercase tracking-tighter">Offer Path</th>
-                <th className="px-6 py-5 text-[11px] font-black text-gray-400 uppercase tracking-tighter">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pipeline.map((buyer) => (
-                <tr key={buyer.id} className="border-b border-gray-50 hover:bg-[#F8FAFC] transition-colors group">
-                  <td className="px-6 py-6">
-                    <div className="flex items-center gap-4">
-                      <img src={buyer.avatar} className="w-10 h-10 rounded-2xl shadow-md" alt="avatar" />
-                      <div>
-                        <p className="text-[14px] font-black text-gray-900">{buyer.name}</p>
-                        <p className="text-[11px] font-bold text-gray-400">Verified Identity</p>
-                      </div>
+        {/* --- Buyers Pipeline Section --- */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2 mb-1 pl-1">
+            <div className="w-[22px] h-[22px] rounded-[6px] bg-[#a25ddc] flex items-center justify-center shadow-sm text-white">
+              <CategoryIcon id="BUYERS" className="w-3.5 h-3.5" />
+            </div>
+            <h2 className="text-[15px] font-black text-[#a25ddc]">潜力买家 (Pipeline)</h2>
+            <span className="text-gray-400 text-xs ml-1 font-medium">{pipeline.length}</span>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            {pipeline.map((buyer, index) => (
+              <div 
+                key={buyer.id} 
+                className={`flex items-center gap-3 p-3 transition-colors hover:bg-gray-50 cursor-pointer ${
+                  index !== pipeline.length - 1 ? 'border-b border-gray-100' : ''
+                }`}
+                onClick={() => { setSelectedBuyerId(buyer.id); setIsDrawerOpen(true); }}
+              >
+                <div className="w-1.5 h-10 rounded-full shrink-0 bg-[#a25ddc]" />
+                <div className="flex-1 flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-full border border-gray-100 shadow-sm bg-cover bg-center shrink-0" style={{ backgroundImage: `url(https://i.pravatar.cc/100?u=${buyer.id})` }} />
+                  <div className="flex flex-col truncate">
+                    <span className="text-[14px] font-bold text-gray-900 truncate">{buyer.name}</span>
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-gray-500 mt-0.5 truncate">
+                      <span className="bg-gray-50 px-1.5 py-0.5 rounded-md text-gray-600 shrink-0 border border-gray-100">{buyer.maxBudget}</span>
+                      <span className="truncate">{buyer.roleDescription}</span>
                     </div>
-                  </td>
-                  <td className="px-6 py-6">
-                    <p className="text-[15px] font-black text-gray-900 leading-none">{buyer.budget}</p>
-                    <p className="text-[11px] font-bold text-indigo-500 mt-1 uppercase">Max Potential</p>
-                  </td>
-                  <td className="px-6 py-6">
-                    <div className="flex flex-col gap-1.5">
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-md inline-block max-w-fit ${buyer.financeStatus === 'CASH' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
-                        {buyer.financeStatus}
-                      </span>
-                      <div className="flex gap-1">
-                        {buyer.conditions.finance && <span className="w-4 h-4 bg-orange-100 text-orange-600 flex items-center justify-center text-[8px] rounded font-black" title="Finance Needed">F</span>}
-                        {buyer.conditions.building && <span className="w-4 h-4 bg-blue-100 text-blue-600 flex items-center justify-center text-[8px] rounded font-black" title="Building Report">B</span>}
-                        {buyer.conditions.lim && <span className="w-4 h-4 bg-purple-100 text-purple-600 flex items-center justify-center text-[8px] rounded font-black" title="LIM Report">L</span>}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-6 text-right">
-                    <p className="text-[13px] font-black text-gray-900">{buyer.lastFollowUp}</p>
-                    <p className="text-[11px] font-medium text-amber-600 italic mt-0.5 truncate max-w-[120px]">{buyer.nextAction}</p>
-                  </td>
-                  <td className="px-6 py-6">
-                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-tight ${
-                      buyer.currentOfferStatus === 'SENT' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30' : 
-                      buyer.currentOfferStatus === 'DRAFT' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-400'
-                    }`}>
-                      {buyer.currentOfferStatus === 'NONE' ? 'NO OFFER' : buyer.currentOfferStatus}
-                    </span>
-                  </td>
-                  <td className="px-6 py-6">
-                    <button 
-                      onClick={() => setSelectedBuyerId(buyer.id)}
-                      className="w-10 h-10 rounded-xl bg-gray-50 text-gray-900 flex items-center justify-center hover:bg-black hover:text-white transition-all group-hover:shadow-xl"
-                    >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" /></svg>
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {/* 📋 Follow-up Activity & Quick Actions (Docked Bottom) */}
-      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[900px] p-6 pb-10 pointer-events-none">
-        <div className="bg-gray-900 rounded-[40px] shadow-2xl p-6 pointer-events-auto flex items-center justify-between border border-white/10 ring-8 ring-gray-900/5">
-          <div className="flex items-center gap-8 pl-4">
-             <div className="text-white">
-                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Pipeline Health</p>
-                <div className="flex items-center gap-2 mt-1">
-                   {[1, 2, 3, 4, 5].map(i => <div key={i} className={`h-1.5 w-6 rounded-full ${i <= 4 ? 'bg-[#FF8C00]' : 'bg-white/10'}`} />)}
-                   <span className="text-[13px] font-black text-[#FF8C00] ml-2">High Engagement</span>
+                  </div>
                 </div>
-             </div>
-             <div className="h-10 w-px bg-white/10" />
-             <div className="text-white">
-                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Next Critical Deadline</p>
-                <p className="text-[13px] font-black text-white mt-1">24 Mar - Finance Approval (Johnson)</p>
-             </div>
-          </div>
-          <div className="flex gap-4 pr-2">
-            <button className="h-14 px-8 bg-white/5 hover:bg-white/10 text-white font-black rounded-3xl transition-all border border-white/10">Broadcast Update</button>
-            <button className="h-14 px-10 bg-[#FF8C00] text-white font-black rounded-3xl transition-all shadow-xl shadow-orange-500/20 active:scale-95">Initiate Master S&P</button>
+                <div className="flex items-center gap-3 shrink-0">
+                  <MondayStatusBadge status={buyer.status} />
+                  <button className="w-8 h-8 rounded-full flex items-center justify-center border border-gray-200 text-gray-500 hover:bg-gray-100">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* 📝 Interaction Panel (Buyer Focus Side Panel) */}
-      {selectedBuyerId && (
-        <div className="fixed inset-0 z-[100] flex justify-end">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-in fade-in" onClick={() => setSelectedBuyerId(null)} />
-          <div className="relative w-full max-w-lg bg-white h-full shadow-2xl p-10 flex flex-col animate-in slide-in-from-right duration-500">
+      {/* Footer Area Matching Providers Page */}
+      <div className="fixed bottom-0 left-0 right-0 max-w-[640px] mx-auto bg-gradient-to-t from-[#f5f6f8] via-[#f5f6f8] p-4 pb-8 z-40">
+        <button className="w-full bg-white border-2 border-dashed border-gray-200 text-gray-700 font-bold py-3.5 rounded-xl hover:border-gray-400 hover:bg-gray-50 transition-colors shadow-sm flex items-center justify-center gap-2">
+           <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+           管理更多房产与买家库
+        </button>
+      </div>
+
+      {/* Interaction Drawer - Simplified for Consistency */}
+      {isDrawerOpen && selectedBuyer && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setIsDrawerOpen(false)} />
+          <div className="relative w-full max-w-[450px] h-full bg-white shadow-2xl flex flex-col p-8">
             <div className="flex justify-between items-center mb-10">
-              <h3 className="text-2xl font-black text-gray-900">Buyer Management</h3>
-              <button 
-                onClick={() => setSelectedBuyerId(null)}
-                className="w-12 h-12 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-900 transition-colors"
-              >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
+               <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-full bg-cover bg-center border border-gray-100" style={{ backgroundImage: `url(https://i.pravatar.cc/100?u=${selectedBuyer.id})` }} />
+                  <div>
+                    <h2 className="text-xl font-black text-gray-900">{selectedBuyer.name}</h2>
+                    <p className="text-xs font-bold text-gray-400">{selectedBuyer.roleDescription}</p>
+                  </div>
+               </div>
+               <button onClick={() => setIsDrawerOpen(false)} className="w-10 h-10 rounded-full border border-gray-100 flex items-center justify-center text-gray-400 hover:bg-gray-50">
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto pr-4 scrollbar-hide">
-              {/* Buyer Profile Header */}
-              {pipeline.find(b => b.id === selectedBuyerId) && (
-                <>
-                  <div className="flex items-center gap-6 mb-10">
-                    <img src={pipeline.find(b => b.id === selectedBuyerId)?.avatar} className="w-24 h-24 rounded-[40px] shadow-2xl" alt="profile" />
-                    <div>
-                      <h4 className="text-3xl font-black text-gray-900 leading-tight">{pipeline.find(b => b.id === selectedBuyerId)?.name}</h4>
-                      <div className="flex items-center gap-3 mt-2">
-                        <span className="text-orange-600 font-bold text-sm">Verified Premium Buyer</span>
-                        <div className="w-1 h-1 bg-gray-300 rounded-full" />
-                        <span className="text-gray-400 font-bold text-sm">Member since 2022</span>
-                      </div>
-                    </div>
+            <div className="space-y-8 flex-1 overflow-y-auto">
+               <div>
+                  <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-widest mb-4">联系方式</h3>
+                  <div className="space-y-2">
+                     <p className="text-sm font-bold text-gray-700">Email: {selectedBuyer.email}</p>
+                     <p className="text-sm font-bold text-gray-700">Phone: {selectedBuyer.phone}</p>
                   </div>
+               </div>
+               
+               <div>
+                  <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-widest mb-4">快速操作</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                     <button 
+                        onClick={() => router.push(`/contract/${selectedPropertyId}?buyer=${selectedBuyer.id}`)}
+                        className="py-4 bg-orange-600 text-white rounded-xl font-black text-xs uppercase shadow-lg shadow-orange-100"
+                     >
+                        生成出价 (S&P)
+                     </button>
+                     <button className="py-4 bg-gray-800 text-white rounded-xl font-black text-xs uppercase shadow-lg shadow-gray-100">
+                        记录跟进
+                     </button>
+                  </div>
+               </div>
 
-                  <div className="grid grid-cols-2 gap-4 mb-10">
-                    <div className="p-6 bg-gray-50 rounded-[32px] border border-gray-100">
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Offer History</p>
-                      <div className="space-y-3">
-                         {pipeline.find(b => b.id === selectedBuyerId)?.offerHistory.map((off, idx) => (
-                           <div key={idx} className="flex justify-between items-center">
-                             <span className="text-[13px] font-bold text-gray-700">{off.amount}</span>
-                             <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${off.status === 'REJECTED' ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'}`}>{off.status}</span>
+               <div>
+                  <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-widest mb-4">最近记录</h3>
+                  <div className="space-y-4">
+                     {activities.map(log => (
+                        <div key={log.id} className="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                           <div className="flex justify-between items-center mb-1">
+                              <span className="text-[10px] font-black text-orange-600 uppercase">{log.type}</span>
+                              <span className="text-[10px] text-gray-400">{log.timestamp}</span>
                            </div>
-                         ))}
-                         {pipeline.find(b => b.id === selectedBuyerId)?.offerHistory.length === 0 && <p className="text-[12px] font-medium text-gray-400 italic">No offers recorded</p>}
-                      </div>
-                    </div>
-                    <div className="p-6 bg-emerald-50 rounded-[32px] border border-emerald-100 flex flex-col justify-center items-center">
-                      <p className="text-[10px] font-black text-emerald-600/60 uppercase tracking-widest mb-1">Budget Index</p>
-                      <p className="text-2xl font-black text-emerald-700">{pipeline.find(b => b.id === selectedBuyerId)?.budget}</p>
-                    </div>
-                  </div>
-
-                  <div className="mb-10">
-                    <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest mb-4">Activity Log / Follow-up History</p>
-                    <div className="space-y-4 border-l-2 border-orange-100 pl-6 pb-2">
-                        <div className="relative">
-                          <div className="absolute -left-[31px] top-1.5 w-3 h-3 bg-[#FF8C00] rounded-full border-2 border-white" />
-                          <p className="text-[14px] font-black text-gray-900 leading-none">Phone call with Michael</p>
-                          <p className="text-gray-500 text-[12px] font-medium mt-1">Discussed their building inspector availability for tomorrow morning.</p>
-                          <p className="text-[10px] font-black text-gray-300 mt-2 uppercase">2 Hours Ago</p>
+                           <p className="text-sm font-medium text-gray-700">{log.content}</p>
                         </div>
-                        <div className="relative opacity-60">
-                          <div className="absolute -left-[31px] top-1.5 w-3 h-3 bg-gray-300 rounded-full border-2 border-white" />
-                          <p className="text-[14px] font-black text-gray-900 leading-none">Private Viewing (Evening)</p>
-                          <p className="text-gray-500 text-[12px] font-medium mt-1">Second viewing with their parents. Highly impressed with the kitchen.</p>
-                          <p className="text-[10px] font-black text-gray-300 mt-2 uppercase">2 Days Ago</p>
-                        </div>
-                    </div>
+                     ))}
                   </div>
-                </>
-              )}
-            </div>
-
-            <div className="pt-8 grid grid-cols-2 gap-4">
-              <button className="h-16 bg-gray-900 text-white font-black rounded-2xl shadow-xl shadow-black/10 hover:scale-[1.02] transition-transform">Log Follow-up</button>
-              <button 
-                onClick={() => {
-                  const buyer = pipeline.find(b => b.id === selectedBuyerId);
-                  if (buyer) {
-                    sessionStorage.setItem(`offer_terms_${property.id}`, JSON.stringify({ purchaserName: buyer.name, offerPrice: parseInt(buyer.budget.replace(/[^0-9]/g, '')), settlementDate: '2024-05-01' }));
-                    router.push(`/contract/${property.id}`);
-                  }
-                }}
-                className="h-16 bg-[#FF8C00] text-white font-black rounded-2xl shadow-xl shadow-orange-500/20 hover:scale-[1.02] transition-transform"
-              >
-                Draft Offer (S&P)
-              </button>
+               </div>
             </div>
           </div>
         </div>
       )}
-
-    </main>
-  );
-}
-w-lg shadow-orange-500/20 hover:bg-[#FF8C00]/90 transition-all flex items-center justify-center gap-2"
-                >
-                  {isSubmitting ? '正在准备 S&P...' : '生成 S&P 并发送签署 →'}
-                </button>
-                <p className="text-[11px] text-center text-gray-400 font-medium px-4">
-                  点击按钮将根据上述条款自动生成标准新西兰房屋买卖协议，并进入正式线上签署中心。
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-    </main>
+    </div>
   );
 }
