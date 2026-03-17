@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
-const stripe = new Stripe(stripeSecretKey);
-
 export async function GET(req: Request) {
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
+  const stripe = new Stripe(stripeSecretKey);
+
   try {
     const { searchParams } = new URL(req.url);
     const stripeAccountId = searchParams.get('stripeAccountId');

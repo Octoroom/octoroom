@@ -3,20 +3,19 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '');
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 export async function POST(req: Request) {
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '');
+  const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
   try {
     const { bookingId, manual } = await req.json();
 
     // Mode 1: Single booking payout (manual trigger)
     if (bookingId) {
-      const result = await processPayoutForBooking(bookingId);
+      const result = await processPayoutForBooking(bookingId, stripe, supabaseAdmin);
       return NextResponse.json(result);
     }
 
@@ -40,7 +39,7 @@ export async function POST(req: Request) {
 
     const results = [];
     for (const b of eligibleBookings) {
-      const result = await processPayoutForBooking(b.id);
+      const result = await processPayoutForBooking(b.id, stripe, supabaseAdmin);
       results.push({ bookingId: b.id, ...result });
     }
 
@@ -57,7 +56,7 @@ export async function POST(req: Request) {
   }
 }
 
-async function processPayoutForBooking(bookingId: string) {
+async function processPayoutForBooking(bookingId: string, stripe: Stripe, supabaseAdmin: any) {
   try {
     // 1. Fetch booking
     const { data: booking, error: fetchErr } = await supabaseAdmin

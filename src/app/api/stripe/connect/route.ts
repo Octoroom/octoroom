@@ -2,16 +2,14 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
-const stripe = new Stripe(stripeSecretKey);
-
-// 使用 Admin Client (service_role key)，因为 API Route 是服务端代码，无法访问客户端 session
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-);
-
 export async function POST(req: Request) {
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
+  const stripe = new Stripe(stripeSecretKey);
+  const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+  );
+
   try {
     const { userId, email, returnUrl } = await req.json();
 

@@ -14,6 +14,7 @@ export default function ContractPage() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const [signUrl, setSignUrl] = useState<string | null>(null);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [propertyStatus, setPropertyStatus] = useState<string>('loading');
@@ -71,7 +72,7 @@ export default function ContractPage() {
 
       let offerQuery = supabase
         .from('octo_offers')
-        .select('id, status, signwell_doc_id')
+        .select('*')
         .eq('property_id', propertyId);
 
       if (urlOfferId) {
@@ -80,7 +81,7 @@ export default function ContractPage() {
         offerQuery = offerQuery.eq('buyer_id', user.id);
       }
       
-      const { data: offer } = await offerQuery.single();
+      const { data: offer } = await offerQuery.maybeSingle();
 
       // --- 🔄 Load Terms Logic ---
       if (offer) {
@@ -314,14 +315,42 @@ export default function ContractPage() {
             setDocumentId(data.documentId); 
             setStep(2); 
             openSignPopup(data.signUrl, data.documentId); 
-          } else {
-            throw new Error(data.error || '生成失败');
           }
+        }
+      } catch (error: any) {
+      alert(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRejectOffer = async () => {
+    if (!offerId) return;
+    if (!confirm('您确定要拒绝这份出价吗？此操作无法撤销。')) return;
+
+    setRejecting(true);
+    try {
+      const response = await fetch('/api/signwell/reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          offerId,
+          propertyId,
+          rejectedBy: isSeller ? 'SELLER' : 'BUYER'
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        alert('已成功拒绝该出价');
+        router.push(isAgentDrafting ? '/provider-workspace' : `/property/${propertyId}`);
+      } else {
+        throw new Error(data.error || '拒绝失败');
       }
     } catch (error: any) {
       alert(error.message);
     } finally {
-      setLoading(false);
+      setRejecting(false);
     }
   };
 
@@ -549,9 +578,24 @@ export default function ContractPage() {
               </>
             )}
 
-            <button onClick={handleGenerateContract} disabled={loading} className={`w-full py-5 rounded-2xl font-black text-xl shadow-2xl transition-all ${loading ? 'bg-gray-200 text-gray-400' : 'bg-black text-white hover:bg-gray-800 active:scale-[0.98]'}`}>
-              {loading ? '正在同步数据...' : (isSeller && !isAgentDrafting ? '确认无误，进入补签 (Confirm & Go to Sign)' : (isAgentDrafting ? '推送给买家签署 (Send to Buyer)' : (isSeller ? '审核并接受出价 (Review & Accept Offer)' : '生成正式合同并开始出价 (Submit Offer)')))}
-            </button>
+            <div className="flex flex-col md:flex-row gap-4">
+              {offerId && !isAgentDrafting && (
+                <button 
+                  onClick={handleRejectOffer} 
+                  disabled={loading || rejecting} 
+                  className={`flex-1 py-5 rounded-2xl font-bold text-xl transition-all border-2 ${rejecting ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-white text-red-600 border-red-100 hover:bg-red-50 active:scale-[0.98]'}`}
+                >
+                  {rejecting ? '正在处理...' : '拒绝该出价 (Reject Offer)'}
+                </button>
+              )}
+              <button 
+                onClick={handleGenerateContract} 
+                disabled={loading || rejecting} 
+                className={`flex-[2] py-5 rounded-2xl font-black text-xl shadow-2xl transition-all ${loading ? 'bg-gray-200 text-gray-400' : 'bg-black text-white hover:bg-gray-800 active:scale-[0.98]'}`}
+              >
+                {loading ? '正在同步数据...' : (isSeller && !isAgentDrafting ? '确认无误，进入补签 (Confirm & Go to Sign)' : (isAgentDrafting ? '推送给买家签署 (Send to Buyer)' : (isSeller ? '审核并接受出价 (Review & Accept Offer)' : '生成正式合同并开始出价 (Submit Offer)')))}
+              </button>
+            </div>
           </div>
         )}
 
