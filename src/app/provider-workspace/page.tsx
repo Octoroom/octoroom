@@ -167,6 +167,42 @@ export default function AgentWorkspacePage() {
   const [loadingCloudData, setLoadingCloudData] = useState(false);
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [loadingActivities, setLoadingActivities] = useState(false);
+  const [activityCache, setActivityCache] = useState<Record<string, ActivityLog[]>>({});
+  const [orderedPipeline, setOrderedPipeline] = useState<Buyer[]>([]);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  // Update orderedPipeline whenever mocked or cloud buyers change
+  useEffect(() => {
+    const basePipeline = [...(MOCKED_PIPELINE[selectedPropertyId] || []), ...cloudBuyers];
+    
+    // 🧠 Load persisted order from localStorage
+    const savedOrder = localStorage.getItem(`octoroom_pipeline_order_${selectedPropertyId}`);
+    if (savedOrder) {
+      try {
+        const orderIds = JSON.parse(savedOrder) as string[];
+        const sorted = [...basePipeline].sort((a, b) => {
+          const indexA = orderIds.indexOf(a.id);
+          const indexB = orderIds.indexOf(b.id);
+          if (indexA === -1 && indexB === -1) return 0;
+          if (indexA === -1) return 1;
+          if (indexB === -1) return -1;
+          return indexA - indexB;
+        });
+        setOrderedPipeline(sorted);
+        return;
+      } catch (e) {
+        console.warn("Failed to parse saved order:", e);
+      }
+    }
+    
+    setOrderedPipeline(basePipeline);
+  }, [selectedPropertyId, cloudBuyers]);
+
+  // Helper to persist order
+  const persistOrder = (pipeline: Buyer[]) => {
+    const ids = pipeline.map(b => b.id);
+    localStorage.setItem(`octoroom_pipeline_order_${selectedPropertyId}`, JSON.stringify(ids));
+  };
 
   // --- 📝 Add Customer Modal State ---
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -245,6 +281,12 @@ export default function AgentWorkspacePage() {
   }, [expandedBuyerId, selectedPropertyId, currentAgentId]);
 
   const fetchRealActivities = async (buyer: Buyer) => {
+    // 💡 Instant Cache Check
+    if (activityCache[buyer.id]) {
+      setActivities(activityCache[buyer.id]);
+      return;
+    }
+
     setLoadingActivities(true);
     try {
       const res = await fetch(`/api/workspace/activities?propertyId=${selectedPropertyId}&buyerEmail=${buyer.email}&buyerId=${buyer.id}`);
@@ -259,6 +301,8 @@ export default function AgentWorkspacePage() {
           agentName: '系统推送'
         }));
         setActivities(mapped);
+        // 🚀 Update Cache
+        setActivityCache(prev => ({ ...prev, [buyer.id]: mapped }));
       } else {
         setActivities([]);
       }
@@ -267,6 +311,37 @@ export default function AgentWorkspacePage() {
       setActivities([]);
     }
     setLoadingActivities(false);
+  };
+
+  const moveBuyer = (index: number, direction: 'UP' | 'DOWN') => {
+    const newPipeline = [...orderedPipeline];
+    if (direction === 'UP' && index > 0) {
+      [newPipeline[index], newPipeline[index - 1]] = [newPipeline[index - 1], newPipeline[index]];
+    } else if (direction === 'DOWN' && index < newPipeline.length - 1) {
+      [newPipeline[index], newPipeline[index + 1]] = [newPipeline[index + 1], newPipeline[index]];
+    }
+    setOrderedPipeline(newPipeline);
+    persistOrder(newPipeline);
+  };
+
+  const handleDragStart = (index: number) => {
+    setDraggedIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (index: number) => {
+    if (draggedIndex === null || draggedIndex === index) return;
+    
+    const newPipeline = [...orderedPipeline];
+    const item = newPipeline.splice(draggedIndex, 1)[0];
+    newPipeline.splice(index, 0, item);
+    
+    setOrderedPipeline(newPipeline);
+    persistOrder(newPipeline);
+    setDraggedIndex(null);
   };
 
   const mapNotifToText = (type: string) => {
@@ -408,18 +483,63 @@ export default function AgentWorkspacePage() {
             <span className="text-gray-400 text-xs ml-1 font-medium">{pipeline.length}</span>
           </div>
 
+          <style>{`
+            @keyframes buyerSlideUp {
+              from { opacity: 0; transform: translateY(15px); }
+              to { opacity: 1; transform: translateY(0); }
+            }
+            .buyer-card-animate {
+              opacity: 0;
+              animation: buyerSlideUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+            }
+          `}</style>
+
           <div className="bg-white rounded-[24px] border border-gray-100 shadow-sm overflow-hidden">
-            {pipeline.map((buyer, index) => {
+            {orderedPipeline.map((buyer, index) => {
               const isExpanded = expandedBuyerId === buyer.id;
               
               return (
-                <div key={buyer.id} className={`${index !== pipeline.length - 1 ? 'border-b border-gray-50' : ''}`}>
+                <div 
+                  key={buyer.id} 
+                  className={`buyer-card-animate transition-all duration-300 ${
+                    index !== orderedPipeline.length - 1 ? 'border-b border-gray-50' : ''
+                  } ${draggedIndex === index ? 'opacity-30 scale-95' : 'opacity-100'}`}
+                  style={{ animationDelay: `${index * 0.04}s` }}
+                  draggable
+                  onDragStart={() => handleDragStart(index)}
+                  onDragOver={(e) => handleDragOver(e, index)}
+                  onDrop={() => handleDrop(index)}
+                  onDragEnd={() => setDraggedIndex(null)}
+                >
                   <div 
                     className={`flex items-center gap-3 p-4 transition-all duration-300 cursor-pointer ${
                       isExpanded ? 'bg-gray-50/50' : 'hover:bg-gray-50'
                     }`}
                     onClick={() => setExpandedBuyerId(isExpanded ? null : buyer.id)}
                   >
+                    {/* --- Drag Handle & Reorder Controls --- */}
+                    <div className="flex flex-col gap-1 mr-1 items-center">
+                       <div className="text-gray-300 mb-1 cursor-grab active:cursor-grabbing">
+                         <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M7 2a2 2 0 11.001 4.001A2 2 0 017 2zm0 6a2 2 0 11.001 4.001A2 2 0 017 8zm0 6a2 2 0 11.001 4.001A2 2 0 017 14zm6-12a2 2 0 11.001 4.001A2 2 0 0113 2zm0 6a2 2 0 11.001 4.001A2 2 0 0113 8zm0 6a2 2 0 11.001 4.001A2 2 0 0113 14z" /></svg>
+                       </div>
+                       <div className="flex flex-col gap-0.5">
+                         <button 
+                           disabled={index === 0}
+                           onClick={(e) => { e.stopPropagation(); moveBuyer(index, 'UP'); }}
+                           className={`p-0.5 rounded-md hover:bg-gray-200 transition-colors ${index === 0 ? 'opacity-10' : 'text-gray-400 opacity-60'}`}
+                         >
+                           <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" /></svg>
+                         </button>
+                         <button 
+                           disabled={index === orderedPipeline.length - 1}
+                           onClick={(e) => { e.stopPropagation(); moveBuyer(index, 'DOWN'); }}
+                           className={`p-0.5 rounded-md hover:bg-gray-200 transition-colors ${index === orderedPipeline.length - 1 ? 'opacity-10' : 'text-gray-400 opacity-60'}`}
+                         >
+                           <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                         </button>
+                       </div>
+                    </div>
+
                     <div className={`w-1.5 h-10 rounded-full shrink-0 transition-colors duration-500 ${isExpanded ? 'bg-orange-500' : 'bg-blue-600'}`} />
                     <div className="flex-1 flex items-center gap-3 min-w-0">
                       <div className="w-11 h-11 rounded-full border-2 border-white shadow-md bg-cover bg-center shrink-0" style={{ backgroundImage: `url(https://i.pravatar.cc/100?u=${buyer.id})` }} />
