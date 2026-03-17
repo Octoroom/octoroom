@@ -88,7 +88,7 @@ function CategoryIcon({ id, className = "w-4 h-4" }: { id: string, className?: s
 function MondayStatusBadge({ status }: { status: ProviderStatus }) {
   const statusConfig = {
     WORKING: { text: '服务中', color: 'bg-[#00c875] text-white' }, 
-    DONE: { text: '已完成', color: 'bg-[#0086c0] text-white' }, 
+    DONE: { text: '出价已推送', color: 'bg-[#0086c0] text-white' }, 
     PENDING: { text: '待确认', color: 'bg-[#fdab3d] text-white' }, 
     LOOKING: { text: '寻找中', color: 'bg-[#c4c4c4] text-white' }, 
   };
@@ -168,6 +168,8 @@ export default function AgentWorkspacePage() {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [isAuthorizing, setIsAuthorizing] = useState(true);
   const [currentAgentId, setCurrentAgentId] = useState<string | null>(null);
+  const [cloudBuyers, setCloudBuyers] = useState<Buyer[]>([]);
+  const [loadingCloudData, setLoadingCloudData] = useState(false);
 
   // --- 📝 Add Customer Modal State ---
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -183,11 +185,41 @@ export default function AgentWorkspacePage() {
   });
 
   const currentProperty = MOCKED_PROPERTIES.find(p => p.id === selectedPropertyId)!;
-  const pipeline = MOCKED_PIPELINE[selectedPropertyId] || [];
+  // Combine mocked pipeline with cloud-synced buyers
+  const pipeline = [...(MOCKED_PIPELINE[selectedPropertyId] || []), ...cloudBuyers];
   const selectedBuyer = pipeline.find(b => b.id === selectedBuyerId);
   const activities = selectedBuyerId ? (MOCKED_ACTIVITY[selectedBuyerId] || []) : [];
 
   useEffect(() => {
+    async function fetchCloudBuyers(agentId: string) {
+      setLoadingCloudData(true);
+      const { data, error } = await supabase
+        .from('crm_contacts')
+        .select('*')
+        .eq('agent_id', agentId)
+        .eq('type', 'BUYER');
+
+      if (!error && data) {
+        const mappedBuyers: Buyer[] = data.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          email: c.email,
+          phone: c.phone || '',
+          maxBudget: '$0 (Synced)', // Can be extended if field exists
+          financeStatus: 'UNAPPROVED',
+          status: (c.status as ProviderStatus) || 'PENDING',
+          conditions: [],
+          offerHistory: [],
+          lastFollowUp: 'N/A',
+          nextAction: 'Synced from CRM',
+          roleDescription: 'Cloud Client',
+          company: c.address || 'Unknown Address'
+        }));
+        setCloudBuyers(mappedBuyers);
+      }
+      setLoadingCloudData(false);
+    }
+
     async function checkAuth() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
@@ -195,6 +227,7 @@ export default function AgentWorkspacePage() {
         return;
       }
       setCurrentAgentId(session.user.id);
+      fetchCloudBuyers(session.user.id); // Fetch real buyers here
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
       setUserRole(profile?.role || null);
       setIsAuthorizing(false);

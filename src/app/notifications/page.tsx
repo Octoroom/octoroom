@@ -44,7 +44,7 @@ export default function NotificationsPage() {
       }
 
       // 2. 收集需要的相关人 ID
-      const actorIds = [...new Set(notifs.map(n => n.actor_id))];
+      const actorIds = [...new Set(notifs.map((n: any) => n.actor_id))];
       
       // 3. 一次性并发请求：获取用户资料 + 获取我关注的人 + 获取关注我的人
       const [profilesRes, followingRes, followersRes] = await Promise.all([
@@ -53,13 +53,13 @@ export default function NotificationsPage() {
         supabase.from('follows').select('follower_id').eq('following_id', user.id).in('follower_id', actorIds)
       ]);
 
-      setFollowingIds(new Set(followingRes.data?.map(f => f.following_id) || []));
-      setFollowerIds(new Set(followersRes.data?.map(f => f.follower_id) || []));
+      setFollowingIds(new Set(followingRes.data?.map((f: any) => f.following_id) || []));
+      setFollowerIds(new Set(followersRes.data?.map((f: any) => f.follower_id) || []));
 
-      const profileMap = new Map(profilesRes.data?.map(p => [p.id, p]));
+      const profileMap = new Map(profilesRes.data?.map((p: any) => [p.id, p]));
 
       // 4. 将用户信息拼装进通知
-      const enrichedNotifs = notifs.map(n => ({
+      const enrichedNotifs = notifs.map((n: any) => ({
         ...n,
         actor: profileMap.get(n.actor_id) || { username: '神秘用户', avatar_url: '' }
       }));
@@ -67,7 +67,7 @@ export default function NotificationsPage() {
       setNotifications(enrichedNotifs);
 
       // 5. 看后即焚：标记所有未读通知为已读，并触发全局红点消除
-      const unreadCount = notifs.filter(n => !n.is_read).length;
+      const unreadCount = notifs.filter((n: any) => !n.is_read).length;
       if (unreadCount > 0) {
         await supabase.from('notifications').update({ is_read: true }).eq('receiver_id', user.id).eq('is_read', false);
         window.dispatchEvent(new CustomEvent('local_notifications_read', { detail: { count: unreadCount } }));
@@ -111,13 +111,15 @@ export default function NotificationsPage() {
         return <div className="bg-green-500 text-white rounded-full p-[3px] shadow-sm"><svg fill="currentColor" viewBox="0 0 24 24" className="w-2.5 h-2.5"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg></div>;
       case 'repost':
         return <div className="bg-purple-500 text-white rounded-full p-[3px] shadow-sm"><svg fill="currentColor" viewBox="0 0 24 24" className="w-2.5 h-2.5"><path d="M19 7a1 1 0 0 0-1-1h-8v2h7v5h-3l3.969 5L22 13h-3V8a2 2 0 0 0-2-2zM5 17a1 1 0 0 0 1 1h8v-2H7v-5h3L6 6l-4 5h3v6a2 2 0 0 0 2 2z"/></svg></div>;
+      case 'offer':
+        return <div className="bg-orange-500 text-white rounded-full p-[3px] shadow-sm"><svg fill="currentColor" viewBox="0 0 24 24" className="w-2.5 h-2.5"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg></div>;
       default: return null;
     }
   };
 
   // 🌟 核心：根据 Tab 过滤数据
-  const filteredNotifs = notifications.filter(n => {
-    if (activeTab === 'comments') return ['comment', 'repost'].includes(n.type);
+  const filteredNotifs = notifications.filter((n: any) => {
+    if (activeTab === 'comments') return ['comment', 'repost', 'offer'].includes(n.type);
     return ['like', 'bookmark', 'follow'].includes(n.type);
   });
 
@@ -163,7 +165,11 @@ export default function NotificationsPage() {
                 return (
                   <div 
                     key={notif.id} 
-                    onClick={() => notif.type === 'follow' ? router.push(`/user/${notif.actor_id}`) : router.push(`/post/${notif.reference_id}`)}
+                    onClick={() => {
+                      if (notif.type === 'follow') router.push(`/user/${notif.actor_id}`);
+                      else if (notif.type === 'offer') router.push(`/property/${notif.reference_id}?tab=WORKFLOW`);
+                      else router.push(`/post/${notif.reference_id}`);
+                    }}
                     className={`flex items-center gap-3 p-4 cursor-pointer hover:bg-gray-50 transition-colors bg-white ${!notif.is_read ? 'bg-orange-50/20' : ''} ${index !== filteredNotifs.length - 1 ? 'border-b border-gray-50' : ''}`}
                   >
                     {/* 左侧：头像 + 角标 */}
@@ -189,6 +195,7 @@ export default function NotificationsPage() {
                         {notif.type === 'bookmark' && '收藏了你的帖子'}
                         {notif.type === 'comment' && '评论了你的帖子'}
                         {notif.type === 'repost' && '转发了你的帖子'}
+                        {notif.type === 'offer' && '为你准备了一份购房协议，请确认并签署'}
                       </p>
                     </div>
 

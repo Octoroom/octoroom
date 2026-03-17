@@ -3,11 +3,12 @@ const fs = require('fs');
 const path = require('path');
 
 // Manually load .env.local
-const envPath = path.resolve(process.cwd(), '../../.env.local');
+const envPath = path.resolve(__dirname, '../../../.env.local');
 if (fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, 'utf-8');
   envContent.split('\n').forEach(line => {
-    const [key, value] = line.split('=');
+    const [key, ...valueParts] = line.split('=');
+    const value = valueParts.join('='); // Handle cases where value contains '='
     if (key && value) {
       process.env[key.trim()] = value.trim().replace(/^"|"$/g, '');
     }
@@ -20,7 +21,7 @@ const supabaseAdmin = createClient(
 );
 
 async function populateCRM() {
-  const agentEmail = 'jonasfub@gmail.com';
+  const agentEmail = 'jonasfub@gmail.com'; // User's agent email
   console.log(`正在为代理商 ${agentEmail} 录入数据...`);
 
   // 1. 获取代理商 ID

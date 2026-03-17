@@ -10,7 +10,7 @@ const supabaseAdmin = createClient(
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { templateId, propertyId, buyerName, buyerEmail, buyerId, offerTerms } = body;
+    const { templateId, propertyId, buyerName, buyerEmail, buyerId, offerTerms, isAgentDrafting } = body;
 
     if (!templateId || !propertyId || !buyerName || !buyerEmail || !buyerId) {
       return NextResponse.json({ error: "请求参数不完整，缺少买家或房源信息" }, { status: 400 });
@@ -51,8 +51,8 @@ export async function POST(request: Request) {
       test_mode: true,
       template_id: templateId, 
       name: `Octoroom S&P 协议 - 房源 ${propertyId}`,
-      embedded_signing: true,
-      embedded_signing_notifications: true,
+      embedded_signing: !isAgentDrafting, // 🌟 Agent workflow: send email instead of embedded
+      ...(!isAgentDrafting && { embedded_signing_notifications: true }),
       external_id: propertyId,
       
       // ⚠️ 最外层的 redirect_url 已经彻底移除，解决多方签署拦截问题！
@@ -112,6 +112,72 @@ export async function POST(request: Request) {
     if (!response.ok) return NextResponse.json({ error: `SignWell 拒绝了请求: ${textData}` }, { status: 500 });
 
     const data = JSON.parse(textData);
+
+    // If it's an agent drafting, we persist the offer and update CRM status immediately
+    if (isAgentDrafting) {
+      // 1. Create the offer record
+      const offerData: any = {
+        property_id: propertyId,
+        buyer_id: buyerId,
+        signwell_doc_id: data.id,
+        status: 'pending_buyer_signature'
+      };
+
+      if (offerTerms) {
+        offerData.legal_buyer_name = offerTerms.purchaserName || null;
+        offerData.buyer_address = offerTerms.buyerAddress || null;
+        offerData.contact_number = offerTerms.contactNumber || null;
+        offerData.buyer_lawyer_id = offerTerms.buyerLawyerId || null;
+        offerData.buyer_lawyer_name = offerTerms.buyerLawyerName || null;
+        offerData.buyer_lawyer_address = offerTerms.buyerLawyerAddress || null;
+        offerData.buyer_lawyer_contact = offerTerms.buyerLawyerContact || null;
+        offerData.offer_price = offerTerms.offerPrice || null;
+        offerData.finance_type = offerTerms.financeType || 'cash';
+        offerData.finance_days = offerTerms.financeDays || 0;
+        offerData.deposit = offerTerms.deposit || 0;
+        offerData.settlement_date = offerTerms.settlementDate || null;
+        offerData.conditions = offerTerms.conditions || null;
+      }
+
+      // --- 🔍 关键修复：根据邮箱查询真实的买家用户 ID ---
+      // 从 frontend 传来的 buyerId 可能是 CRM ID，我们需要找到真正的 Auth UUID 以便通知和展示
+      let resolvedBuyerId = buyerId;
+      try {
+        const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
+        const actualUser = users.find(u => u.email?.toLowerCase() === buyerEmail?.toLowerCase());
+        if (actualUser) {
+          resolvedBuyerId = actualUser.id;
+          console.log(`Resolved buyer ID for ${buyerEmail}: ${resolvedBuyerId}`);
+        } else {
+           console.warn(`Could not find Auth User for email: ${buyerEmail}. Falling back to provided buyerId: ${buyerId}`);
+        }
+      } catch (err) {
+        console.error("Error resolving buyer ID from email:", err);
+      }
+
+      if (isAgentDrafting) {
+        offerData.buyer_id = resolvedBuyerId;
+        offerData.status = 'pending_buyer_signature';
+      }
+
+      await supabaseAdmin.from('octo_offers').insert(offerData);
+
+      // 2. Create in-app notification for the buyer
+      await supabaseAdmin.from('notifications').insert({
+        receiver_id: resolvedBuyerId,
+        actor_id: property.author_id, // The agent (property author in this case)
+        type: 'offer',
+        reference_id: propertyId,
+        is_read: false
+      });
+
+      // 3. Update CRM contact status
+      // We use buyerId here as it's the CRM contact ID in the context of agent drafting
+      await supabaseAdmin.from('crm_contacts').update({ status: 'DONE' }).eq('id', buyerId);
+
+      return NextResponse.json({ success: true, documentId: data.id });
+    }
+
     const buyerSignUrl = data.recipients?.find((r: any) => r.id === 'buyer_id')?.embedded_signing_url;
 
     return NextResponse.json({ signUrl: buyerSignUrl, documentId: data.id });

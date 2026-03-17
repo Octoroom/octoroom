@@ -20,6 +20,27 @@ export default function ContractPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [offerId, setOfferId] = useState<string | null>(null);
   const [isSeller, setIsSeller] = useState<boolean>(false);
+  const [isAgentDrafting, setIsAgentDrafting] = useState<boolean>(false);
+  const [buyerEmail, setBuyerEmail] = useState<string>('');
+  const [targetBuyerId, setTargetBuyerId] = useState<string | null>(searchParams?.get('buyer') || null);
+
+  // --- 📝 Offer Terms Form State (Mirrored from Prepare Page) ---
+  const [purchaserName, setPurchaserName] = useState('');
+  const [buyerAddress, setBuyerAddress] = useState('');
+  const [contactNumber, setContactNumber] = useState('');
+  const [offerPrice, setOfferPrice] = useState('');
+  const [financeType, setFinanceType] = useState<'cash' | 'finance'>('finance');
+  const [financeDays, setFinanceDays] = useState('15');
+  const [deposit, setDeposit] = useState('10');
+  const [needsLIM, setNeedsLIM] = useState(true);
+  const [limDays, setLimDays] = useState('15');
+  const [needsBuilding, setNeedsBuilding] = useState(true);
+  const [buildingDays, setBuildingDays] = useState('15');
+  const [needsTox, setNeedsTox] = useState(false);
+  const [toxDays, setToxDays] = useState('15');
+  const [settlementDate, setSettlementDate] = useState('');
+  const [lawyers, setLawyers] = useState<any[]>([]);
+  const [selectedLawyerId, setSelectedLawyerId] = useState('');
   
   const [templates] = useState([
     { id: '9b6eeb8e-9cf7-4cf2-99e8-34d1c7782f14', title: '新西兰标准房屋买卖协议 (S&P)' },
@@ -60,14 +81,87 @@ export default function ContractPage() {
       }
       
       const { data: offer } = await offerQuery.single();
-        
+
+      // --- 🔄 Load Terms Logic ---
       if (offer) {
         setOfferId(offer.id);
         const isUserSeller = propData?.author_id === user.id;
+        
+        // If there's an offer, load terms from DB
+        setPurchaserName(offer.legal_buyer_name || '');
+        setBuyerAddress(offer.buyer_address || '');
+        setContactNumber(offer.contact_number || '');
+        setOfferPrice(offer.offer_price?.toString() || '');
+        setFinanceType(offer.finance_type || 'cash');
+        setFinanceDays(offer.finance_days?.toString() || '0');
+        setDeposit(offer.deposit?.toString() || '10');
+        setSettlementDate(offer.settlement_date || '');
+        setSelectedLawyerId(offer.buyer_lawyer_id || '');
+        
+        if (offer.conditions) {
+          setNeedsLIM(!!offer.conditions.lim);
+          setLimDays(offer.conditions.lim?.toString() || '15');
+          setNeedsBuilding(!!offer.conditions.building);
+          setBuildingDays(offer.conditions.building?.toString() || '15');
+          setNeedsTox(!!offer.conditions.toxicology);
+          setToxDays(offer.conditions.toxicology?.toString() || '15');
+        }
+
         if (!isUserSeller || offer.status === 'accepted' || offer.status === 'sold') {
           setStep(3);
         }
+      } else if (!isSeller) {
+        // New offer draft: load from session storage
+        const termsStr = sessionStorage.getItem(`offer_terms_${propertyId}`);
+        if (termsStr) {
+          const t = JSON.parse(termsStr);
+          setPurchaserName(t.purchaserName || '');
+          setBuyerAddress(t.buyerAddress || '');
+          setContactNumber(t.contactNumber || '');
+          setOfferPrice(t.offerPrice?.toString() || '');
+          setFinanceType(t.financeType || 'finance');
+          setFinanceDays(t.financeDays?.toString() || '15');
+          setDeposit(t.deposit?.toString() || '10');
+          setSettlementDate(t.settlementDate || '');
+          setSelectedLawyerId(t.buyerLawyerId || '');
+          if (t.conditions) {
+            setNeedsLIM(!!t.conditions.lim);
+            setLimDays(t.conditions.lim?.toString() || '15');
+            setNeedsBuilding(!!t.conditions.building);
+            setBuildingDays(t.conditions.building?.toString() || '15');
+            setNeedsTox(!!t.conditions.toxicology);
+            setToxDays(t.conditions.toxicology?.toString() || '15');
+          }
+        }
       }
+      
+      // Fetch Lawyers
+      const { data: lawyerProfiles } = await supabase.from('profiles').select('id, username, full_name, avatar_url, bio').eq('role', 'LAWYER');
+      if (lawyerProfiles) setLawyers(lawyerProfiles);
+
+      // --- 🕵️ Agent Drafting Mode Detection ---
+      // If targetBuyerId is present, the property owner (agent) is drafting for a buyer.
+      if (targetBuyerId) {
+        setIsAgentDrafting(true);
+        // Fetch buyer details from CRM or Profile
+        const { data: contact } = await supabase.from('crm_contacts').select('name, email, phone, address').eq('id', targetBuyerId).single();
+        if (contact) {
+          setPurchaserName(contact.name || '');
+          setBuyerEmail(contact.email || '');
+          setContactNumber(contact.phone || '');
+          setBuyerAddress(contact.address || '');
+        } else {
+          // Fallback to profiles if not in CRM
+          const { data: profile } = await supabase.from('profiles').select('full_name, username').eq('id', targetBuyerId).single();
+          if (profile) {
+              setPurchaserName(profile.full_name || profile.username || '');
+          }
+        }
+      } else if (!isSeller) {
+          // Normal buyer flow: use their own email
+          setBuyerEmail(user.email || '');
+      }
+
       setLoading(false);
 
       channel = supabase
@@ -75,7 +169,7 @@ export default function ContractPage() {
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'octo_offers', filter: `property_id=eq.${propertyId}` },
-          (payload) => {
+          (payload: any) => {
             if (payload.new.buyer_id === user.id) {
               setOfferId(payload.new.id);
               setStep(3);
@@ -166,37 +260,63 @@ export default function ContractPage() {
           throw new Error(data.error || '获取签署链接失败');
         }
       } else {
-        // Read terms from sessionStorage established in the prepare page
-        const termsStr = sessionStorage.getItem(`offer_terms_${propertyId}`);
-        const terms = termsStr ? JSON.parse(termsStr) : null;
-        
-        const finalBuyerName = terms?.purchaserName 
-          ? terms.purchaserName 
-          : (user.user_metadata?.full_name || user.email?.split('@')[0]);
+        // Final terms gathered from the page state
+        const selectedLawyer = lawyers.find(l => l.id === selectedLawyerId);
+        const finalTerms = {
+          purchaserName,
+          buyerAddress,
+          contactNumber,
+          offerPrice: Number(offerPrice),
+          financeType,
+          financeDays: financeType === 'finance' ? Number(financeDays) : 0,
+          deposit: Number(deposit),
+          conditions: {
+            lim: needsLIM ? Number(limDays) : false,
+            building: needsBuilding ? Number(buildingDays) : false,
+            toxicology: needsTox ? Number(toxDays) : false,
+          },
+          settlementDate,
+          buyerLawyerId: selectedLawyer?.id || null,
+          buyerLawyerName: selectedLawyer?.full_name || selectedLawyer?.username || null,
+          buyerLawyerAddress: selectedLawyer ? `Professional Chambers, Level 2, Auckland CBD` : null,
+          buyerLawyerContact: selectedLawyer ? `0800 LAWYER` : null
+        };
 
         const response = await fetch('/api/signwell', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            templateId: selectedTemplate,
-            propertyId: propertyId,
-            buyerName: finalBuyerName,
-            buyerEmail: user.email,
-            buyerId: user.id,
-            offerTerms: terms
-          }),
-        });
+            body: JSON.stringify({
+              templateId: selectedTemplate,
+              propertyId: propertyId,
+              buyerName: purchaserName,
+              buyerEmail: isAgentDrafting ? buyerEmail : user.email,
+              buyerId: isAgentDrafting ? targetBuyerId : user.id,
+              offerTerms: finalTerms,
+              isAgentDrafting // Flag for the API to send email instead of embedded url
+            }),
+          });
 
-        const data = await response.json();
+          const data = await response.json();
 
-        if (data.signUrl && data.documentId) {
-          setSignUrl(data.signUrl);
-          setDocumentId(data.documentId); 
-          setStep(2); 
-          openSignPopup(data.signUrl, data.documentId); 
-        } else {
-          throw new Error(data.error || '生成失败');
-        }
+          if (isAgentDrafting) {
+            // If agent drafting, there's no popup. Just proceed to success.
+            if (data.documentId) {
+                setStep(3);
+                // 🚀 Automatic redirection back to workspace after 3 seconds
+                setTimeout(() => {
+                  router.push('/provider-workspace');
+                }, 4000);
+            } else {
+                throw new Error(data.error || '推送失败');
+            }
+          } else if (data.signUrl && data.documentId) {
+            setSignUrl(data.signUrl);
+            setDocumentId(data.documentId); 
+            setStep(2); 
+            openSignPopup(data.signUrl, data.documentId); 
+          } else {
+            throw new Error(data.error || '生成失败');
+          }
       }
     } catch (error: any) {
       alert(error.message);
@@ -223,26 +343,215 @@ export default function ContractPage() {
         </div>
 
         {step === 1 && (
-          <div className="bg-white rounded-[32px] shadow-2xl p-10 border border-gray-100 animate-in fade-in zoom-in-95">
-            <h2 className="text-2xl font-bold mb-8 flex items-center gap-3">
-              <span className="bg-black text-white w-10 h-10 rounded-xl flex items-center justify-center">1</span>
-              确认买卖协议条款
-            </h2>
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
-                  <p className="text-xs text-gray-400 font-bold uppercase mb-2">文件类型</p>
-                  <p className="font-bold text-gray-800">{templates[0].title}</p>
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+            {isSeller && !isAgentDrafting ? (
+              /* --- 🌟 Seller's Role: Offer Summary View --- */
+              <div className="bg-white rounded-[32px] p-8 md:p-12 border border-gray-100 shadow-xl space-y-10 animate-in fade-in zoom-in-95">
+                <div className="flex justify-between items-start border-b border-gray-100 pb-8">
+                  <div>
+                    <h3 className="text-sm font-bold text-blue-600 uppercase tracking-widest mb-2">Offer Summary</h3>
+                    <h2 className="text-3xl font-black text-gray-900">购房出价详细摘要</h2>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[13px] text-gray-400 font-medium">出价时间</div>
+                    <div className="text-[15px] font-bold text-gray-900">
+                      {offerId ? '待审议' : '实时生成'}
+                    </div>
+                  </div>
                 </div>
-                <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
-                  <p className="text-xs text-gray-400 font-bold uppercase mb-2">当前房源状态</p>
-                  <p className="font-bold text-blue-600 uppercase">{propertyStatus}</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+                  <div className="space-y-6">
+                    <div>
+                      <h4 className="text-[12px] font-black text-gray-400 uppercase mb-2">买家主体 (Purchaser)</h4>
+                      <p className="text-lg font-bold text-gray-900">{purchaserName || '未指定'}</p>
+                      <p className="text-sm text-gray-500 mt-1">{buyerAddress}</p>
+                    </div>
+                    <div>
+                      <h4 className="text-[12px] font-black text-gray-400 uppercase mb-2">出价总额 (Purchase Price)</h4>
+                      <p className="text-3xl font-black text-black">
+                        ${Number(offerPrice).toLocaleString()} <span className="text-sm font-bold text-gray-400">NZD</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
+                      <h4 className="text-[12px] font-black text-gray-400 uppercase mb-3">关键支付节点</h4>
+                      <div className="space-y-3">
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-500">定金比例:</span>
+                          <span className="text-sm font-bold text-gray-900">{deposit}%</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-500">交割日期:</span>
+                          <span className="text-sm font-bold text-gray-900">{settlementDate || '无条件'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <h4 className="text-[12px] font-black text-gray-400 uppercase border-b border-gray-50 pb-2">合同附加条件 (Special Conditions)</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="flex items-center gap-3 p-4 rounded-xl bg-gray-50 border border-gray-100">
+                      <div className={`w-3 h-3 rounded-full ${financeType === 'finance' ? 'bg-orange-500' : 'bg-green-500'}`}></div>
+                      <span className="text-sm font-bold text-gray-900">{financeType === 'finance' ? `贷款条款 (${financeDays}天)` : '无贷款条件 (Cash)'}</span>
+                    </div>
+                    {needsLIM && (
+                      <div className="flex items-center gap-3 p-4 rounded-xl bg-blue-50/50 border border-blue-100">
+                        <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                        <span className="text-sm font-bold text-gray-900">政府档案审查 (LIM {limDays}天)</span>
+                      </div>
+                    )}
+                    {needsBuilding && (
+                      <div className="flex items-center gap-3 p-4 rounded-xl bg-blue-50/50 border border-blue-100">
+                        <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                        <span className="text-sm font-bold text-gray-900">建筑检测报告 (Building {buildingDays}天)</span>
+                      </div>
+                    )}
+                    {needsTox && (
+                      <div className="flex items-center gap-3 p-4 rounded-xl bg-blue-50/50 border border-blue-100">
+                        <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                        <span className="text-sm font-bold text-gray-900">毒检报告 (Tox {toxDays}天)</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-orange-50/50 border border-orange-100 rounded-2xl p-6 flex items-center gap-5">
+                   <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
+                      <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                   </div>
+                   <div className="text-sm text-orange-800 leading-relaxed font-medium">
+                     请仔细核对以上条款。点击下方按钮后，您将进入 SignWell 安全签署环境，对现有的 S&P 协议进行联署（Countersign）。一旦签署完成，合同将具有法律约束力。
+                   </div>
                 </div>
               </div>
-              <button onClick={handleGenerateContract} disabled={loading} className={`w-full py-5 rounded-2xl font-black text-xl shadow-2xl transition-all ${loading ? 'bg-gray-200 text-gray-400' : 'bg-black text-white hover:bg-gray-800 active:scale-[0.98]'}`}>
-                {loading ? '正在与加密网络建立连接...' : (isSeller ? '审核并接受出价 (Review & Accept Offer)' : '生成正式合同并开始出价 (Submit Offer)')}
-              </button>
-            </div>
+            ) : (
+              /* --- 🛒 Buyer/Agent Role: Interactive Form View --- */
+              <>
+                {/* Section 1: Basic Info */}
+                <div className="bg-white rounded-[24px] p-6 md:p-8 border border-gray-100 shadow-sm">
+                  <h2 className="text-lg font-black text-gray-900 mb-5 flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-black text-white flex items-center justify-center text-[12px]">A</span> 
+                    买方基础信息与价格 
+                  </h2>
+                  
+                  <div className="space-y-5">
+                    <div>
+                      <label className="block text-[13px] font-bold text-gray-700 mb-1.5">买方全名 (Purchaser Legal Name)</label>
+                      <input type="text" value={purchaserName} onChange={(e) => setPurchaserName(e.target.value)} disabled={isSeller && !isAgentDrafting} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 font-medium focus:ring-2 focus:ring-black focus:outline-none disabled:opacity-60" />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[13px] font-bold text-gray-700 mb-1.5">联系地址 (Address)</label>
+                        <input type="text" value={buyerAddress} onChange={(e) => setBuyerAddress(e.target.value)} disabled={isSeller && !isAgentDrafting} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 font-medium focus:ring-2 focus:ring-black focus:outline-none disabled:opacity-60" />
+                      </div>
+                      <div>
+                        <label className="block text-[13px] font-bold text-gray-700 mb-1.5">联系电话 (Phone)</label>
+                        <input type="tel" value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} disabled={isSeller && !isAgentDrafting} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 font-medium focus:ring-2 focus:ring-black focus:outline-none disabled:opacity-60" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[13px] font-bold text-gray-700 mb-1.5">出价金额 (Offer Price)</label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                        <input type="number" value={offerPrice} onChange={(e) => setOfferPrice(e.target.value)} disabled={isSeller && !isAgentDrafting} className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-4 py-3 font-black text-lg focus:ring-2 focus:ring-black focus:outline-none disabled:opacity-60" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 2: Conditions */}
+                <div className="bg-white rounded-[24px] p-6 md:p-8 border border-gray-100 shadow-sm">
+                  <h2 className="text-lg font-black text-gray-900 mb-5 flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-black text-white flex items-center justify-center text-[12px]">B</span> 
+                    特殊条款 (Conditions)
+                  </h2>
+                  
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-[13px] font-bold text-gray-700 mb-2">资金来源 (Finance)</label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button type="button" onClick={() => !isSeller && setFinanceType('cash')} className={`py-3 rounded-xl font-bold text-[14px] border transition-all ${financeType === 'cash' ? 'bg-black text-white border-black' : 'bg-gray-50 border-gray-200 text-gray-500'}`}>无条件全款 (Cash)</button>
+                        <button type="button" onClick={() => !isSeller && setFinanceType('finance')} className={`py-3 rounded-xl font-bold text-[14px] border transition-all ${financeType === 'finance' ? 'bg-black text-white border-black' : 'bg-gray-50 border-gray-200 text-gray-500'}`}>需要贷款 (Finance)</button>
+                      </div>
+                      {financeType === 'finance' && (
+                        <div className="mt-3 flex items-center gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                          <span className="text-[13px] font-bold text-gray-700">所需工作日:</span>
+                          <input type="number" value={financeDays} onChange={(e) => setFinanceDays(e.target.value)} disabled={isSeller} className="w-20 bg-white border border-gray-200 rounded-lg py-1.5 text-center font-bold" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-4 border-t border-gray-100 space-y-3">
+                      {[
+                        { label: '建检报告 (Building)', checked: needsBuilding, setChecked: setNeedsBuilding, days: buildingDays, setDays: setBuildingDays },
+                        { label: '政府档案 (LIM)', checked: needsLIM, setChecked: setNeedsLIM, days: limDays, setDays: setLimDays },
+                        { label: '毒检报告 (Tox)', checked: needsTox, setChecked: setNeedsTox, days: toxDays, setDays: setToxDays }
+                      ].map((cond, idx) => (
+                        <div key={idx} className={`p-4 rounded-xl border transition-all ${cond.checked ? 'bg-blue-50/30 border-blue-100' : 'bg-gray-50 border-gray-200'}`}>
+                          <label className="flex items-center justify-between cursor-pointer">
+                            <span className="font-bold text-[14px] text-gray-900">{cond.label}</span>
+                            <input type="checkbox" checked={cond.checked} onChange={(e) => !isSeller && cond.setChecked(e.target.checked)} disabled={isSeller} className="w-5 h-5 rounded border-gray-300 text-black focus:ring-black" />
+                          </label>
+                          {cond.checked && (
+                            <div className="flex items-center gap-3 mt-3">
+                              <span className="text-[12px] text-gray-500 font-medium">批准时长 (Days):</span>
+                              <input type="number" value={cond.days} onChange={(e) => cond.setDays(e.target.value)} disabled={isSeller} className="w-16 bg-white border border-gray-200 rounded-lg py-1 text-center font-bold text-[13px]" />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 3: Deposit & Settlement */}
+                <div className="bg-white rounded-[24px] p-6 md:p-8 border border-gray-100 shadow-sm">
+                  <h2 className="text-lg font-black text-gray-900 mb-5 flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-black text-white flex items-center justify-center text-[12px]">C</span> 
+                    定金与交割 (Deposit & Settlement)
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                      <label className="block text-[13px] font-bold text-gray-700 mb-1.5">定金比例 (%)</label>
+                      <input type="number" value={deposit} onChange={(e) => setDeposit(e.target.value)} disabled={isSeller} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 font-bold disabled:opacity-60" />
+                    </div>
+                    <div>
+                      <label className="block text-[13px] font-bold text-gray-700 mb-1.5">最终交割日 (Settlement)</label>
+                      <input type="date" value={settlementDate} onChange={(e) => setSettlementDate(e.target.value)} disabled={isSeller} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 font-bold disabled:opacity-60" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 4: Lawyer */}
+                <div className="bg-white rounded-[24px] p-6 md:p-8 border border-gray-100 shadow-sm">
+                  <h2 className="text-lg font-black text-gray-900 mb-5 flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-black text-white flex items-center justify-center text-[12px]">D</span> 
+                    买方律师 (Solicitor) 
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {lawyers.map(lawyer => (
+                      <div 
+                        key={lawyer.id} 
+                        onClick={() => !isSeller && setSelectedLawyerId(lawyer.id)}
+                        className={`p-4 rounded-xl border-2 transition-all flex items-center gap-3 ${selectedLawyerId === lawyer.id ? 'border-black bg-gray-50' : 'border-gray-100 opacity-60'}`}
+                      >
+                        <img src={lawyer.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${lawyer.username}`} className="w-10 h-10 rounded-full border" />
+                        <div className="font-bold text-sm">{lawyer.full_name || lawyer.username}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            <button onClick={handleGenerateContract} disabled={loading} className={`w-full py-5 rounded-2xl font-black text-xl shadow-2xl transition-all ${loading ? 'bg-gray-200 text-gray-400' : 'bg-black text-white hover:bg-gray-800 active:scale-[0.98]'}`}>
+              {loading ? '正在同步数据...' : (isSeller && !isAgentDrafting ? '确认无误，进入补签 (Confirm & Go to Sign)' : (isAgentDrafting ? '推送给买家签署 (Send to Buyer)' : (isSeller ? '审核并接受出价 (Review & Accept Offer)' : '生成正式合同并开始出价 (Submit Offer)')))}
+            </button>
           </div>
         )}
 
@@ -276,7 +585,7 @@ export default function ContractPage() {
              <div className="w-24 h-24 bg-blue-600 text-white rounded-full flex items-center justify-center mx-auto mb-8 shadow-xl shadow-blue-200">
                 <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0116 0z" /></svg>
              </div>
-             <h2 className="text-3xl font-black text-gray-900 mb-4">{isSeller ? 'Offer 已成功接受！' : 'Offer 已成功提交！'}</h2>
+             <h2 className="text-3xl font-black text-gray-900 mb-4">{isSeller ? 'Offer 已成功接受！' : (isAgentDrafting ? '出价已成功推送！' : 'Offer 已成功提交！')}</h2>
              <p className="text-blue-800 mb-10 text-lg font-medium">
                {isSeller ? (
                  <>您已成功签署接受该出价，合同已正式生效，<br/>系统将通知买家准备支付定金。</>
@@ -285,12 +594,11 @@ export default function ContractPage() {
                )}
              </p>
              
-             {/* 🌟 核心修改点：带上 tab 参数，直接跳转回房源室的 OA 面板 */}
              <button 
-               onClick={() => router.push(`/property/${propertyId}?tab=WORKFLOW`)} 
+               onClick={() => router.push(isAgentDrafting ? '/provider-workspace' : `/property/${propertyId}?tab=WORKFLOW`)} 
                className="px-8 py-4 bg-black text-white rounded-2xl font-bold text-lg shadow-xl hover:bg-gray-800 transition-all active:scale-95"
              >
-               返回交易室查看 OA 进度
+               {isAgentDrafting ? '立即返回工作台' : '返回交易室查看 OA 进度'}
              </button>
           </div>
         )}

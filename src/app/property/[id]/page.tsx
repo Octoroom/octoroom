@@ -145,10 +145,10 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab, currentUserRo
 
       // 🌟 核心逻辑：买卖双方获取 Offer 的逻辑不同
       if (currentUserRole === 'BUYER') {
-        // 买家：只看自己发出的 Offer
-        query = query.eq('buyer_id', user.id).single();
+        // 买家：看自己最新的 Offer
+        query = query.eq('buyer_id', user.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
       } else {
-        // 卖家：获取被正式接受的 Offer，或者如果没有，则获取最新的一个作为待办展示 (但会提示去大厅审核)
+        // 卖家：获取被正式接受的 Offer，或者如果没有，则获取最新的一个作为待办展示
         query = query.order('status', { ascending: true }).order('created_at', { ascending: false }).limit(1).maybeSingle();
       }
 
@@ -181,6 +181,7 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab, currentUserRo
   
   // 🌟 空状态：根据角色显示不同文案
   const isAccepted = offer?.status === 'accepted' || offer?.status === 'sold';
+  const isPendingBuyer = offer?.status === 'pending_buyer_signature';
 
   if (!offer || (currentUserRole === 'SELLER' && !isAccepted)) {
     return (
@@ -213,8 +214,16 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab, currentUserRo
 
   // 🌟 动态构建步骤数组
   const oaSteps: OAStep[] = [
-    { id: 'step_1', title: `${buyerName} 签署 S&P 购房协议`, description: `${buyerName} 已完成线上电子签名，Offer 正式生成。`, role: 'SYSTEM', status: 'COMPLETED', completedAt: offer.created_at },
-    { id: 'step_2', title: '房东审核出价并签字确认', description: `正在等待房东 ${property?.author_name || ''} 审核 ${buyerName} 的出价并完成签名。`, role: 'SELLER', status: isAccepted ? 'COMPLETED' : 'IN_PROGRESS', dueDate: !isAccepted ? tomorrow : undefined },
+    { 
+      id: 'step_1', 
+      title: isPendingBuyer ? '签署购房协议 (S&P)' : `${buyerName} 签署 S&P 购房协议`, 
+      description: isPendingBuyer ? `代理商已为您准备好合规的 S&P 协议，请核对条款并完成签名。` : `${buyerName} 已完成线上电子签名，Offer 正式生成。`, 
+      role: 'BUYER', 
+      status: isPendingBuyer ? 'IN_PROGRESS' : 'COMPLETED', 
+      completedAt: isPendingBuyer ? undefined : offer.created_at,
+      dueDate: isPendingBuyer ? tomorrow : undefined
+    },
+    { id: 'step_2', title: '房东审核出价并签字确认', description: `正在等待房东 ${property?.author_name || ''} 审核 ${buyerName} 的出价并完成签名。`, role: 'SELLER', status: isAccepted ? 'COMPLETED' : 'PENDING', dueDate: (!isAccepted && !isPendingBuyer) ? tomorrow : undefined },
     { id: 'step_3', title: `${buyerName} 支付 10% 定金`, description: '请将定金打入中介或律师的 Trust Account (信托账户)。', role: 'BUYER', status: isAccepted ? 'IN_PROGRESS' : 'PENDING', dueDate: isAccepted ? tomorrow : undefined },
     { id: 'step_4', title: '律师审查 Title & LIM 报告', description: '买方律师需确认房屋产权无瑕疵，并审查政府档案。', role: 'LAWYER', status: 'PENDING', dueDate: nextWeek },
     { id: 'step_5', title: '无条件交割日 (Unconditional)', description: '所有购房条件满足，合同正式生效。', role: 'SYSTEM', status: 'PENDING' }
@@ -327,7 +336,10 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab, currentUserRo
                   {step.status === 'IN_PROGRESS' && step.role === currentUserRole ? (
                     <button 
                       onClick={() => {
-                        if (step.role === 'SELLER') {
+                        if (step.id === 'step_1' && isPendingBuyer) {
+                          // 买家去签署
+                          router.push(`/contract/${propertyId}`);
+                        } else if (step.role === 'SELLER') {
                           // 卖家点击，带上 offerId 去合同页签署
                           router.push(`/contract/${propertyId}?offerId=${offer.id}`);
                         } else if (step.title.includes('律师')) {
@@ -338,7 +350,7 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab, currentUserRo
                       }} 
                       className="bg-orange-500 text-white px-4 py-1.5 rounded-lg text-[12px] font-bold hover:bg-orange-600 transition-colors shadow-sm shadow-orange-200"
                     >
-                      {step.role === 'SELLER' ? '去审核并签署 →' : step.title.includes('律师') ? '去大厅选律师 →' : '去处理 →'}
+                      {isPendingBuyer && step.id === 'step_1' ? '去核对并签名 →' : step.role === 'SELLER' ? '去审核并签署 →' : step.title.includes('律师') ? '去大厅选律师 →' : '去处理 →'}
                     </button>
                   ) : step.status === 'IN_PROGRESS' ? (
                     <span className="text-[12px] font-bold text-orange-500 animate-pulse bg-orange-50 px-2 py-1 rounded">正在等待对方处理...</span>
