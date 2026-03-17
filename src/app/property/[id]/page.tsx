@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import React from 'react';
 import { supabase } from '@/lib/supabase';
@@ -837,5 +837,13 @@ export default function PropertyTradeRoom() {
       </div>
 
     </main>
+  );
+}
+
+export default function PropertyPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center shadow-lg border border-gray-100/50"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>}>
+      <PropertyContent />
+    </Suspense>
   );
 }

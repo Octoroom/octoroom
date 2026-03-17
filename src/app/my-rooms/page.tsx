@@ -1,7 +1,7 @@
 // src/app/my-rooms/page.tsx
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLanguage } from '@/lib/i18n';
@@ -125,16 +125,14 @@ function RoomCardSlider({ images, viewMode, roomCity, className }: { images: str
   );
 }
 
-export default function MyRoomsPage() {
+function MyRoomsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t, lang } = useLanguage();
   
   const [activeTab, setActiveTab] = useState<'rooms' | 'orders' | 'payouts'>(() => {
-    if (typeof window !== 'undefined') {
-      const tab = new URLSearchParams(window.location.search).get('tab');
-      if (tab === 'payouts') return 'payouts';
-    }
+    const tab = searchParams.get('tab');
+    if (tab === 'payouts') return 'payouts';
     return 'rooms';
   });
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -1090,5 +1088,12 @@ export default function MyRoomsPage() {
         .leaflet-container { z-index: 10 !important; font-family: inherit; }
       `}} />
     </main>
+  );
+}
+export default function MyRoomsPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center border-r border-gray-100"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>}>
+      <MyRoomsContent />
+    </Suspense>
   );
 }

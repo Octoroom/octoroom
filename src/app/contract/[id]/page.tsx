@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-export default function ContractPage() {
+function ContractContent() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
@@ -649,5 +649,13 @@ export default function ContractPage() {
 
       </div>
     </div>
+  );
+}
+
+export default function ContractPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black"></div></div>}>
+      <ContractContent />
+    </Suspense>
   );
 }
