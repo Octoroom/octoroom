@@ -38,14 +38,46 @@ export async function POST(request: Request) {
         .single();
     
     if (prop) {
-        const receiverId = (rejectedBy === 'SELLER') ? offer.buyer_id : prop.author_id;
+        const agentId = prop.author_id;
+        const buyerId = offer.buyer_id;
+
+        // 1. 通知受检方 (如果是卖家拒绝，通知买家；如果是买家拒绝，通知代理/卖家)
+        const receiverId = (rejectedBy === 'SELLER') ? buyerId : agentId;
+        const actorId = (rejectedBy === 'SELLER') ? agentId : buyerId;
+
         await supabaseAdmin.from('notifications').insert({
             receiver_id: receiverId,
-            actor_id: rejectedBy === 'SELLER' ? prop.author_id : offer.buyer_id,
+            actor_id: actorId,
             type: 'offer_rejected',
             reference_id: propertyId,
             is_read: false
         });
+
+        // 2. 🌟 同时给发起方也发一条通知，确保其工作台时间线能双向同步展示
+        await supabaseAdmin.from('notifications').insert({
+            receiver_id: actorId, // 发起方作为接收者（为了时间线展示）
+            actor_id: receiverId, 
+            type: 'offer_rejected',
+            reference_id: propertyId,
+            is_read: false
+        });
+
+        // 3. 🌟 回退 CRM 客户状态为 WORKING，以便代理商跟进
+        try {
+            const { data: userData } = await supabaseAdmin.auth.admin.getUserById(buyerId);
+            const buyerEmail = userData?.user?.email;
+
+            if (buyerEmail) {
+                await supabaseAdmin
+                    .from('crm_contacts')
+                    .update({ status: 'WORKING' })
+                    .eq('email', buyerEmail)
+                    .eq('agent_id', agentId);
+                console.log(`✅ 已自动回退买家 [${buyerEmail}] 的 CRM 状态为 WORKING`);
+            }
+        } catch (crmErr) {
+            console.error("回退 CRM 状态失败 (非核心流程):", crmErr);
+        }
     }
 
     return NextResponse.json({ success: true });

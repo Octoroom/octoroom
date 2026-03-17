@@ -20,6 +20,7 @@ function ContractContent() {
   const [propertyStatus, setPropertyStatus] = useState<string>('loading');
   const [userId, setUserId] = useState<string | null>(null);
   const [offerId, setOfferId] = useState<string | null>(null);
+  const [offerStatus, setOfferStatus] = useState<string | null>(null);
   const [isSeller, setIsSeller] = useState<boolean>(false);
   const [isAgentDrafting, setIsAgentDrafting] = useState<boolean>(false);
   const [buyerEmail, setBuyerEmail] = useState<string>('');
@@ -86,6 +87,7 @@ function ContractContent() {
       // --- 🔄 Load Terms Logic ---
       if (offer) {
         setOfferId(offer.id);
+        setOfferStatus(offer.status);
         const isUserSeller = propData?.author_id === user.id;
         
         // If there's an offer, load terms from DB
@@ -303,7 +305,7 @@ function ContractContent() {
             // If agent drafting, there's no popup. Just proceed to success.
             if (data.documentId) {
                 setStep(3);
-                // 🚀 Automatic redirection back to workspace after 3 seconds
+                // 🚀 Automatic redirection back to workspace after 4 seconds
                 setTimeout(() => {
                   router.push('/provider-workspace');
                 }, 4000);
@@ -343,7 +345,7 @@ function ContractContent() {
       const data = await response.json();
       if (data.success) {
         alert('已成功拒绝该出价');
-        router.push(isAgentDrafting ? '/provider-workspace' : `/property/${propertyId}`);
+        router.push(isAgentDrafting ? '/provider-workspace' : `/property/${propertyId}?tab=WORKFLOW`);
       } else {
         throw new Error(data.error || '拒绝失败');
       }
@@ -353,6 +355,12 @@ function ContractContent() {
       setRejecting(false);
     }
   };
+
+  // Logic to show/hide the Reject Offer button
+  const shouldShowRejectButton = offerId && !isAgentDrafting && (
+    (isSeller && (offerStatus === 'pending_seller_signature' || !offerStatus)) || 
+    (!isSeller && offerStatus === 'pending_buyer_signature')
+  );
 
   if (loading && step === 1) {
     return <div className="min-h-screen flex items-center justify-center bg-[#F8F9FB]">正在加载签署环境...</div>;
@@ -579,7 +587,7 @@ function ContractContent() {
             )}
 
             <div className="flex flex-col md:flex-row gap-4">
-              {offerId && !isAgentDrafting && (
+              {shouldShowRejectButton && (
                 <button 
                   onClick={handleRejectOffer} 
                   disabled={loading || rejecting} 

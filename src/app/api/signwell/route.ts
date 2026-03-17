@@ -43,9 +43,25 @@ export async function POST(request: Request) {
     const sellerEmail = rawSellerEmail === buyerEmail ? rawSellerEmail.replace('@', '+seller@') : rawSellerEmail;
     const sellerName = property.author_name || "房东";
 
-    // 构造跳转回我们隐形 API 的 URL
-    const successRedirectUrl = `${origin}/api/signwell/success?property_id=${propertyId}&buyer_id=${buyerId}`;
-    const sellerSuccessUrl = `${origin}/api/signwell/seller-success?property_id=${propertyId}&buyer_id=${buyerId}`;
+    // --- 🔍 关键修复：根据邮箱查询真实的买家用户 ID ---
+    // 从 frontend 传来的 buyerId 可能是 CRM ID，我们需要找到真正的 Auth UUID 以便通知和展示
+    let resolvedBuyerId = buyerId;
+    try {
+      const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
+      const actualUser = users.find(u => u.email?.toLowerCase() === buyerEmail?.toLowerCase());
+      if (actualUser) {
+        resolvedBuyerId = actualUser.id;
+        console.log(`Resolved buyer ID for ${buyerEmail}: ${resolvedBuyerId}`);
+      } else {
+         console.warn(`Could not find Auth User for email: ${buyerEmail}. Falling back to provided buyerId: ${buyerId}`);
+      }
+    } catch (err) {
+      console.error("Error resolving buyer ID from email:", err);
+    }
+
+    // 构造跳转回我们隐形 API 的 URL (始终使用 Auth UUID)
+    const successRedirectUrl = `${origin}/api/signwell/success?property_id=${propertyId}&buyer_id=${resolvedBuyerId}`;
+    const sellerSuccessUrl = `${origin}/api/signwell/seller-success?property_id=${propertyId}&buyer_id=${resolvedBuyerId}`;
 
     const payload = {
       test_mode: true,
@@ -55,15 +71,12 @@ export async function POST(request: Request) {
       ...(!isAgentDrafting && { embedded_signing_notifications: true }),
       external_id: propertyId,
       
-      // ⚠️ 最外层的 redirect_url 已经彻底移除，解决多方签署拦截问题！
-
       recipients: [
         { 
           id: 'buyer_id', 
           placeholder_name: 'buyer', 
           name: buyerName, 
           email: buyerEmail,
-          // 🌟 核心绝招：把跳转链接精准绑定在买家身上！
           redirect_url: successRedirectUrl 
         },
         { 
@@ -75,7 +88,6 @@ export async function POST(request: Request) {
         }
       ],
       
-      // 🌟 根据前端传入的表单数据，动态填入 SignWell Template 中对应的 API IDs 
       ...(offerTerms && {
         template_fields: [
           { api_id: 'property_address', value: property.address_name || '' },
@@ -118,7 +130,7 @@ export async function POST(request: Request) {
       // 1. Create the offer record
       const offerData: any = {
         property_id: propertyId,
-        buyer_id: buyerId,
+        buyer_id: resolvedBuyerId, // Use Auth UUID
         signwell_doc_id: data.id,
         status: 'pending_buyer_signature'
       };
@@ -139,28 +151,11 @@ export async function POST(request: Request) {
         offerData.conditions = offerTerms.conditions || null;
       }
 
-      // --- 🔍 关键修复：根据邮箱查询真实的买家用户 ID ---
-      // 从 frontend 传来的 buyerId 可能是 CRM ID，我们需要找到真正的 Auth UUID 以便通知和展示
-      let resolvedBuyerId = buyerId;
-      try {
-        const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
-        const actualUser = users.find(u => u.email?.toLowerCase() === buyerEmail?.toLowerCase());
-        if (actualUser) {
-          resolvedBuyerId = actualUser.id;
-          console.log(`Resolved buyer ID for ${buyerEmail}: ${resolvedBuyerId}`);
-        } else {
-           console.warn(`Could not find Auth User for email: ${buyerEmail}. Falling back to provided buyerId: ${buyerId}`);
-        }
-      } catch (err) {
-        console.error("Error resolving buyer ID from email:", err);
+      const { error: offerError } = await supabaseAdmin.from('octo_offers').insert(offerData);
+      if (offerError) {
+        console.error("Error inserting offer:", offerError);
+        return NextResponse.json({ error: "无法创建报价记录: " + offerError.message }, { status: 500 });
       }
-
-      if (isAgentDrafting) {
-        offerData.buyer_id = resolvedBuyerId;
-        offerData.status = 'pending_buyer_signature';
-      }
-
-      await supabaseAdmin.from('octo_offers').insert(offerData);
 
       // 2. Create in-app notification for the buyer
       await supabaseAdmin.from('notifications').insert({

@@ -154,22 +154,19 @@ const MOCKED_PIPELINE: Record<string, Buyer[]> = {
   ]
 };
 
-const MOCKED_ACTIVITY: Record<string, ActivityLog[]> = {
-  'b1': [
-    { id: 'a1', type: 'CALL', content: 'Discussed finance status. Bank letter expected by Friday.', timestamp: 'today 10:00 AM', agentName: 'Jerry Agent' },
-  ]
-};
+const MOCKED_ACTIVITY: Record<string, ActivityLog[]> = {};
 
 export default function AgentWorkspacePage() {
   const router = useRouter();
   const [selectedPropertyId, setSelectedPropertyId] = useState(MOCKED_PROPERTIES[0].id);
-  const [selectedBuyerId, setSelectedBuyerId] = useState<string | null>(null);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [expandedBuyerId, setExpandedBuyerId] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [isAuthorizing, setIsAuthorizing] = useState(true);
   const [currentAgentId, setCurrentAgentId] = useState<string | null>(null);
   const [cloudBuyers, setCloudBuyers] = useState<Buyer[]>([]);
   const [loadingCloudData, setLoadingCloudData] = useState(false);
+  const [activities, setActivities] = useState<ActivityLog[]>([]);
+  const [loadingActivities, setLoadingActivities] = useState(false);
 
   // --- 📝 Add Customer Modal State ---
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -187,8 +184,6 @@ export default function AgentWorkspacePage() {
   const currentProperty = MOCKED_PROPERTIES.find(p => p.id === selectedPropertyId)!;
   // Combine mocked pipeline with cloud-synced buyers
   const pipeline = [...(MOCKED_PIPELINE[selectedPropertyId] || []), ...cloudBuyers];
-  const selectedBuyer = pipeline.find(b => b.id === selectedBuyerId);
-  const activities = selectedBuyerId ? (MOCKED_ACTIVITY[selectedBuyerId] || []) : [];
 
   useEffect(() => {
     async function fetchCloudBuyers(agentId: string) {
@@ -241,6 +236,59 @@ export default function AgentWorkspacePage() {
     fetchLawyers();
   }, []);
 
+  // --- 🌟 Fetch Real Activities for Transaction Timeline ---
+  useEffect(() => {
+    const selectedBuyer = pipeline.find(b => b.id === expandedBuyerId);
+    if (expandedBuyerId && selectedPropertyId && currentAgentId && selectedBuyer) {
+      fetchRealActivities(selectedBuyer);
+    }
+  }, [expandedBuyerId, selectedPropertyId, currentAgentId]);
+
+  const fetchRealActivities = async (buyer: Buyer) => {
+    setLoadingActivities(true);
+    try {
+      const res = await fetch(`/api/workspace/activities?propertyId=${selectedPropertyId}&buyerEmail=${buyer.email}&buyerId=${buyer.id}`);
+      const data = await res.json();
+
+      if (data.activities && Array.isArray(data.activities)) {
+        const mapped: ActivityLog[] = data.activities.map((n: any) => ({
+          id: n.id,
+          type: (n.type === 'offer' || n.type.startsWith('offer_')) ? 'OFFER' : 'NOTE',
+          content: n.content || mapNotifToText(n.type),
+          timestamp: new Date(n.created_at).toLocaleString(),
+          agentName: '系统推送'
+        }));
+        setActivities(mapped);
+      } else {
+        setActivities([]);
+      }
+    } catch (err) {
+      console.error("Fetch activities failed:", err);
+      setActivities([]);
+    }
+    setLoadingActivities(false);
+  };
+
+  const mapNotifToText = (type: string) => {
+    switch (type) {
+      case 'offer': return '代理已向买家推送购房协议 (Offer)';
+      case 'offer_signed_buyer': return '买家已完成签署，等待卖家确认';
+      case 'offer_signed_seller': return '卖家已接受并签署，交易合意达成！';
+      case 'offer_rejected': return '该出价已被婉拒 (Rejected)';
+      default: return '交易流状态更新';
+    }
+  };
+
+  const navigateToDraft = (email: string, name: string) => {
+    const params = new URLSearchParams({
+      property_id: selectedPropertyId,
+      buyer_email: email,
+      buyer_name: name,
+      agent_id: currentAgentId || ''
+    });
+    router.push(`/contract/${selectedPropertyId}/prepare?${params.toString()}`);
+  };
+
   const handleAddCustomerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentAgentId) {
@@ -291,10 +339,10 @@ export default function AgentWorkspacePage() {
   }
 
   return (
-    <div className="flex-1 max-w-[640px] w-full min-h-screen border-r border-gray-100 bg-[#f5f6f8] flex flex-col relative mx-auto font-sans">
+    <main className="flex-1 max-w-[640px] w-full min-h-screen border-r border-gray-100 bg-[#fefefe] flex flex-col relative mx-auto font-sans">
       
       {/* 顶部导航 (Providers Page Style) */}
-      <div className="bg-white px-4 py-4 border-b border-gray-100 sticky top-0 z-30 flex items-center justify-between">
+      <div className="bg-white/80 backdrop-blur-md px-4 py-4 border-b border-gray-100 sticky top-0 z-30 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button onClick={() => router.back()} className="p-2 -ml-2 hover:bg-gray-50 rounded-full transition-colors">
             <svg className="w-5 h-5 text-gray-900" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
@@ -302,7 +350,7 @@ export default function AgentWorkspacePage() {
             </svg>
           </button>
           <div>
-            <h1 className="text-[18px] font-black text-gray-900 leading-tight">代理商工作台 (云同步)</h1>
+            <h1 className="text-[18px] font-black text-gray-900 leading-tight">代理商工作台 (Cloud Workspace)</h1>
             <p className="text-[12px] text-gray-500 font-medium mt-0.5">管线数据已实时接入 Supabase</p>
           </div>
         </div>
@@ -316,7 +364,7 @@ export default function AgentWorkspacePage() {
           </button>
           <button 
             onClick={() => setIsModalOpen(true)}
-            className="bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-blue-700 shadow-sm transition-transform active:scale-95"
+            className="bg-black text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-800 shadow-sm transition-transform active:scale-95"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
           </button>
@@ -327,24 +375,24 @@ export default function AgentWorkspacePage() {
         {/* --- Featured Property Section --- */}
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 mb-1 pl-1">
-            <div className="w-[22px] h-[22px] rounded-[6px] bg-[#ff7575] flex items-center justify-center shadow-sm text-white">
+            <div className="w-[22px] h-[22px] rounded-[6px] bg-black flex items-center justify-center shadow-sm text-white">
               <CategoryIcon id="PROPERTIES" className="w-3.5 h-3.5" />
             </div>
-            <h2 className="text-[15px] font-black text-[#ff7575]">当前维护房源</h2>
+            <h2 className="text-[15px] font-black text-gray-900">当前维护房源</h2>
             <span className="text-gray-400 text-xs ml-1 font-medium">1</span>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            <div className="flex items-center gap-3 p-4">
-               <div className="w-1.5 h-12 rounded-full shrink-0 bg-[#ff7575]" />
-               <div className="w-16 h-16 rounded-lg bg-cover bg-center shrink-0 border border-gray-100" style={{ backgroundImage: `url(${currentProperty.image})` }} />
+          <div className="bg-white rounded-[20px] border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-4 p-4">
+               <div className="w-1.5 h-12 rounded-full shrink-0 bg-black" />
+               <div className="w-16 h-16 rounded-xl bg-cover bg-center shrink-0 border border-gray-100 shadow-inner" style={{ backgroundImage: `url(${currentProperty.image})` }} />
                <div className="flex-1 truncate">
-                  <h3 className="text-[16px] font-black text-gray-900 truncate">{currentProperty.address}</h3>
-                  <p className="text-[12px] font-bold text-gray-400 mt-0.5">业主: {currentProperty.vendor}</p>
+                  <h3 className="text-[16px] font-black text-gray-900 truncate tracking-tight">{currentProperty.address}</h3>
+                  <p className="text-[12px] font-bold text-gray-400 mt-0.5 uppercase tracking-wider">业主: {currentProperty.vendor}</p>
                </div>
-               <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded-lg border border-gray-100 shrink-0">
-                  <CategoryIcon id="STATS" className="w-3.5 h-3.5 text-gray-400" />
-                  <span className="text-[12px] font-black text-gray-600">{currentProperty.activeBuyers} 意向人</span>
+               <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-full border border-gray-100 shrink-0">
+                  <CategoryIcon id="STATS" className="w-3.5 h-3.5 text-black" />
+                  <span className="text-[12px] font-black text-gray-700">{currentProperty.activeBuyers} 意向人</span>
                </div>
             </div>
           </div>
@@ -353,52 +401,118 @@ export default function AgentWorkspacePage() {
         {/* --- Buyers Pipeline Section --- */}
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 mb-1 pl-1">
-            <div className="w-[22px] h-[22px] rounded-[6px] bg-[#a25ddc] flex items-center justify-center shadow-sm text-white">
+            <div className="w-[22px] h-[22px] rounded-[6px] bg-blue-600 flex items-center justify-center shadow-sm text-white">
               <CategoryIcon id="BUYERS" className="w-3.5 h-3.5" />
             </div>
-            <h2 className="text-[15px] font-black text-[#a25ddc]">买家管线 (Pipeline)</h2>
+            <h2 className="text-[15px] font-black text-blue-600">买家管线 (Pipeline)</h2>
             <span className="text-gray-400 text-xs ml-1 font-medium">{pipeline.length}</span>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            {pipeline.map((buyer, index) => (
-              <div 
-                key={buyer.id} 
-                className={`flex items-center gap-3 p-3 transition-colors hover:bg-gray-50 cursor-pointer ${
-                  index !== pipeline.length - 1 ? 'border-b border-gray-100' : ''
-                }`}
-                onClick={() => { setSelectedBuyerId(buyer.id); setIsDrawerOpen(true); }}
-              >
-                <div className="w-1.5 h-10 rounded-full shrink-0 bg-[#a25ddc]" />
-                <div className="flex-1 flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-full border border-gray-100 shadow-sm bg-cover bg-center shrink-0" style={{ backgroundImage: `url(https://i.pravatar.cc/100?u=${buyer.id})` }} />
-                  <div className="flex flex-col truncate">
-                    <span className="text-[14px] font-bold text-gray-900 truncate">{buyer.name}</span>
-                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-gray-500 mt-0.5 truncate">
-                      <span className="bg-gray-50 px-1.5 py-0.5 rounded-md text-gray-600 shrink-0 border border-gray-100">{buyer.maxBudget}</span>
-                      <span className="truncate">{buyer.roleDescription}</span>
+          <div className="bg-white rounded-[24px] border border-gray-100 shadow-sm overflow-hidden">
+            {pipeline.map((buyer, index) => {
+              const isExpanded = expandedBuyerId === buyer.id;
+              
+              return (
+                <div key={buyer.id} className={`${index !== pipeline.length - 1 ? 'border-b border-gray-50' : ''}`}>
+                  <div 
+                    className={`flex items-center gap-3 p-4 transition-all duration-300 cursor-pointer ${
+                      isExpanded ? 'bg-gray-50/50' : 'hover:bg-gray-50'
+                    }`}
+                    onClick={() => setExpandedBuyerId(isExpanded ? null : buyer.id)}
+                  >
+                    <div className={`w-1.5 h-10 rounded-full shrink-0 transition-colors duration-500 ${isExpanded ? 'bg-orange-500' : 'bg-blue-600'}`} />
+                    <div className="flex-1 flex items-center gap-3 min-w-0">
+                      <div className="w-11 h-11 rounded-full border-2 border-white shadow-md bg-cover bg-center shrink-0" style={{ backgroundImage: `url(https://i.pravatar.cc/100?u=${buyer.id})` }} />
+                      <div className="flex flex-col truncate">
+                        <span className="text-[14px] font-black text-gray-900 truncate tracking-tight">{buyer.name}</span>
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500 mt-0.5 truncate">
+                          <span className="bg-white px-2 py-0.5 rounded-full text-gray-600 shrink-0 border border-gray-100 shadow-sm">{buyer.maxBudget}</span>
+                          <span className="truncate opacity-70 uppercase tracking-wide">{buyer.roleDescription}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4 shrink-0">
+                      <MondayStatusBadge status={buyer.status} />
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isExpanded ? 'rotate-180 text-orange-600 bg-orange-100/50' : 'text-gray-300 bg-gray-50'}`}>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" /></svg>
+                      </div>
                     </div>
                   </div>
+
+                  {/* --- Inline Expanded Content with Interactive Timeline --- */}
+                  <div className={`px-4 bg-gray-50/30 overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-[800px] py-6 border-t border-gray-100' : 'max-h-0'}`}>
+                       <div className="flex gap-3 mb-8">
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); navigateToDraft(buyer.email, buyer.name); }}
+                            className="flex-1 bg-black text-white font-black py-3 rounded-2xl shadow-xl shadow-gray-200 flex items-center justify-center gap-2 hover:bg-gray-800 active:scale-95 transition-all text-[13px] tracking-tight"
+                          >
+                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                             生成出价 (Create Offer)
+                          </button>
+                          <button className="flex-1 bg-white text-black border-2 border-gray-100 font-black py-3 rounded-2xl hover:bg-gray-50 active:scale-95 transition-all shadow-sm text-[13px] tracking-tight">
+                             记录跟进 note
+                          </button>
+                       </div>
+
+                       <div className="space-y-4">
+                          <div className="flex items-center justify-between pl-1 pr-1">
+                            <h4 className="text-[11px] font-black text-gray-400 uppercase tracking-widest">交易动态实时线 (Timeline)</h4>
+                            <span className="text-[10px] font-bold text-gray-300 uppercase">Live Update</span>
+                          </div>
+                          
+                          {loadingActivities ? (
+                            <div className="py-8 flex flex-col items-center justify-center gap-3">
+                               <div className="w-6 h-6 border-2 border-gray-200 border-t-black rounded-full animate-spin"></div>
+                               <span className="text-[11px] font-bold text-gray-400">正在同步交易流水...</span>
+                            </div>
+                          ) : activities.length > 0 ? (
+                            <div className="space-y-3 relative before:absolute before:left-[15px] before:top-2 before:bottom-2 before:w-[2px] before:bg-gray-100">
+                               {activities.map((log, idx) => (
+                                 <div key={log.id} className="relative pl-9 group">
+                                    <div className={`absolute left-0 top-1.5 w-[32px] h-[32px] rounded-full border-4 border-gray-50 flex items-center justify-center z-10 transition-transform group-hover:scale-110 ${idx === 0 ? 'bg-orange-500 text-white shadow-lg shadow-orange-100' : 'bg-white text-gray-400 border-gray-100'}`}>
+                                       {idx === 0 ? (
+                                         <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" /></svg>
+                                       ) : (
+                                         <div className="w-1.5 h-1.5 rounded-full bg-gray-300" />
+                                       )}
+                                    </div>
+                                    <div className="p-4 bg-white rounded-[18px] border border-gray-100 shadow-sm transition-all hover:border-gray-200">
+                                       <div className="flex justify-between items-center mb-1.5">
+                                          <span className={`text-[10px] font-black uppercase tracking-wider ${idx === 0 ? 'text-orange-600' : 'text-gray-400'}`}>
+                                            {idx === 0 ? '最新动态' : '历史轨迹'}
+                                          </span>
+                                          <span className="text-[10px] font-bold text-gray-300">{log.timestamp}</span>
+                                       </div>
+                                       <p className="text-[13px] font-bold text-gray-800 leading-snug">{log.content}</p>
+                                    </div>
+                                 </div>
+                               ))}
+                            </div>
+                          ) : (
+                            <div className="py-10 text-center bg-gray-100/40 rounded-[20px] border-2 border-dashed border-gray-200/60">
+                               <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm">
+                                  <svg className="w-5 h-5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0116 0z" /></svg>
+                               </div>
+                               <p className="text-[12px] font-black text-gray-400">暂无该笔交易的相关流水记录</p>
+                               <p className="text-[10px] font-bold text-gray-300 mt-1 uppercase">No activity tracked yet</p>
+                            </div>
+                          )}
+                       </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <MondayStatusBadge status={buyer.status} />
-                  <button className="w-8 h-8 rounded-full flex items-center justify-center border border-gray-200 text-gray-500 hover:bg-gray-100">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 max-w-[640px] mx-auto bg-gradient-to-t from-[#f5f6f8] via-[#f5f6f8] p-4 pb-8 z-40">
+      <div className="fixed bottom-0 left-0 right-0 max-w-[640px] mx-auto bg-gradient-to-t from-white via-white/95 to-transparent p-4 pb-8 z-40 backdrop-blur-sm">
         <button 
           onClick={() => router.push('/provider-workspace/crm')}
-          className="w-full bg-white border-2 border-dashed border-gray-200 text-gray-700 font-bold py-3.5 rounded-xl hover:border-gray-400 hover:bg-gray-50 transition-colors shadow-sm flex items-center justify-center gap-2"
+          className="w-full bg-black text-white font-black py-4 rounded-2xl hover:bg-gray-800 transition-all shadow-xl shadow-gray-200 flex items-center justify-center gap-2 active:scale-[0.98]"
         >
-           <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-           查看全库 CRM 客户
+           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+           查看全库 CRM 客户中心
         </button>
       </div>
 
@@ -466,66 +580,6 @@ export default function AgentWorkspacePage() {
         </div>
       )}
 
-      {/* Interaction Drawer */}
-      {isDrawerOpen && selectedBuyer && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setIsDrawerOpen(false)} />
-          <div className="relative w-full max-w-[450px] h-full bg-white shadow-2xl flex flex-col p-8">
-            <div className="flex justify-between items-center mb-10">
-               <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-full bg-cover bg-center border border-gray-100" style={{ backgroundImage: `url(https://i.pravatar.cc/100?u=${selectedBuyer.id})` }} />
-                  <div className="text-left">
-                    <h2 className="text-xl font-black text-gray-900">{selectedBuyer.name}</h2>
-                    <p className="text-xs font-bold text-gray-400">{selectedBuyer.roleDescription}</p>
-                  </div>
-               </div>
-               <button onClick={() => setIsDrawerOpen(false)} className="w-10 h-10 rounded-full border border-gray-100 flex items-center justify-center text-gray-400 hover:bg-gray-50">
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-               </button>
-            </div>
-
-            <div className="space-y-8 flex-1 overflow-y-auto text-left">
-               <div>
-                  <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-widest mb-4">联系方式</h3>
-                  <div className="space-y-2">
-                     <p className="text-sm font-bold text-gray-700">Email: {selectedBuyer.email}</p>
-                     <p className="text-sm font-bold text-gray-700">Phone: {selectedBuyer.phone}</p>
-                  </div>
-               </div>
-               
-               <div>
-                  <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-widest mb-4">快速操作</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                     <button 
-                        onClick={() => router.push(`/contract/${selectedPropertyId}?buyer=${selectedBuyer.id}`)}
-                        className="py-4 bg-orange-600 text-white rounded-xl font-black text-xs uppercase shadow-lg shadow-orange-100"
-                     >
-                        生成出价 (S&P)
-                     </button>
-                     <button className="py-4 bg-gray-800 text-white rounded-xl font-black text-xs uppercase shadow-lg shadow-gray-100">
-                        记录跟进
-                     </button>
-                  </div>
-               </div>
-
-               <div>
-                  <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-widest mb-4">最近记录</h3>
-                  <div className="space-y-4">
-                     {activities.map(log => (
-                        <div key={log.id} className="p-4 bg-gray-50 rounded-xl border border-gray-100">
-                           <div className="flex justify-between items-center mb-1">
-                              <span className="text-[10px] font-black text-orange-600 uppercase">{log.type}</span>
-                              <span className="text-[10px] text-gray-400">{log.timestamp}</span>
-                           </div>
-                           <p className="text-sm font-medium text-gray-700">{log.content}</p>
-                        </div>
-                     ))}
-                  </div>
-               </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    </main>
   );
 }

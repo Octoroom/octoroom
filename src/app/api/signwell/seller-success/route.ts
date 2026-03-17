@@ -27,6 +27,33 @@ export async function GET(request: Request) {
     if (error) throw error;
     console.log(`✅ 成功将买家 [${buyerId}] 对房源 [${propertyId}] 的 Offer 更新为 accepted！`);
 
+    // 2.5 🌟 通知买家/代理：卖家已签署协议（签署流程完成）
+    const { data: prop } = await supabaseAdmin
+      .from('octo_properties')
+      .select('author_id')
+      .eq('id', propertyId)
+      .single();
+    
+    if (prop) {
+      // 通知买家
+      await supabaseAdmin.from('notifications').insert({
+        receiver_id: buyerId,
+        actor_id: prop.author_id,
+        type: 'offer_signed_seller',
+        reference_id: propertyId,
+        is_read: false
+      });
+      
+      // 通知代理/卖家自己 (为了在代理工作台展示时间线)
+      await supabaseAdmin.from('notifications').insert({
+        receiver_id: prop.author_id,
+        actor_id: buyerId,
+        type: 'offer_signed_seller',
+        reference_id: propertyId,
+        is_read: false
+      });
+    }
+
     // 3. 返回一段自动关闭弹窗的 HTML！
     return new NextResponse(`
       <!DOCTYPE html>

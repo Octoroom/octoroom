@@ -40,6 +40,23 @@ export async function GET(request: Request) {
 
       if (error) throw error;
       console.log(`✅ 成功录入买家 [${buyerId}] 对房源 [${propertyId}] 的 Offer！`);
+
+      // 3.5 🌟 通知代理/卖家：买家已签署协议
+      const { data: prop } = await supabaseAdmin
+        .from('octo_properties')
+        .select('author_id')
+        .eq('id', propertyId)
+        .single();
+      
+      if (prop) {
+        await supabaseAdmin.from('notifications').insert({
+          receiver_id: prop.author_id,
+          actor_id: buyerId,
+          type: 'offer_signed_buyer',
+          reference_id: propertyId,
+          is_read: false
+        });
+      }
     }
 
     // 4. 🌟 返回一段自动关闭弹窗的 HTML！
