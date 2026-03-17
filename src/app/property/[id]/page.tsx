@@ -370,7 +370,8 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab, currentUserRo
 // ==========================================
 // 🌟 主组件：交易室页面
 // ==========================================
-export default function PropertyTradeRoom() {
+function PropertyContent() {
+
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams(); // 🌟 引入查询参数 hook
