@@ -195,12 +195,13 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
     }
   };
 
-  // 一键切换测试账号
+  // 一键切换测试账号 (密码覆盖版)
   const handleTestAccountSwitch = async (targetUserId: string) => {
     if (!targetUserId || targetUserId === currentUserId) return;
 
     setIsSwitchingRole(true);
     try {
+      // 1. 调用后端 API，获取该用户的真实邮箱和统一密码
       const res = await fetch('/api/impersonate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -209,18 +210,29 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
       
       const data = await res.json();
       
-      if (data.link) {
+      if (data.email && data.password) {
+        // 2. 先退出当前账号，清理本地缓存
         await supabase.auth.signOut();
         localStorage.removeItem('octo_room_auth');
         localStorage.removeItem('octo_room_user_id');
-        window.location.href = data.link; 
+        
+        // 🌟 3. 在后台静默执行账号密码登录（完美绕过 SSR 丢失 Token 的问题）
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: data.email,
+          password: data.password,
+        });
+
+        if (signInError) throw signInError;
+
+        // 4. 登录成功，刷新页面以加载新身份的数据！
+        window.location.href = '/'; 
       } else {
         alert("切换失败: " + (data.error || "未知错误"));
         setIsSwitchingRole(false);
       }
     } catch (e) {
       console.error("模拟登录失败", e);
-      alert("API 请求失败，请检查网络或后端的 /api/impersonate 接口");
+      alert("登录请求中断，请检查控制台报错");
       setIsSwitchingRole(false);
     }
   };

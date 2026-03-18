@@ -73,6 +73,17 @@ export async function POST(request: Request) {
 
         const { error } = await supabaseAdmin.from('octo_offers').insert(insertData);
         if (error) throw error;
+      } else {
+        // 🌟 如果已经存在（例如 Agent 预先创建的），则更新其状态
+        const { error } = await supabaseAdmin
+          .from('octo_offers')
+          .update({ 
+            status: 'pending_seller_signature',
+            signwell_doc_id: documentId 
+          })
+          .match({ id: existingOffer.id });
+          
+        if (error) throw error;
       }
     } else {
       // 卖家的话，更新状态为 accepted

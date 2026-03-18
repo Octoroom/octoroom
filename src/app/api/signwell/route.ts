@@ -80,8 +80,8 @@ export async function POST(request: Request) {
       test_mode: true,
       template_id: templateId, 
       name: `Octoroom S&P 协议 - 房源 ${propertyId}`,
-      embedded_signing: !isAgentDrafting, // 🌟 Agent workflow: send email instead of embedded
-      ...(!isAgentDrafting && { embedded_signing_notifications: true }),
+      embedded_signing: true, // 🌟 Always use embedded signing
+      embedded_signing_notifications: true, // 🌟 Always send email notifications
       external_id: propertyId,
       
       recipients: [

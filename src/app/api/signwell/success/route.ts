@@ -40,23 +40,35 @@ export async function GET(request: Request) {
 
       if (error) throw error;
       console.log(`✅ 成功录入买家 [${buyerId}] 对房源 [${propertyId}] 的 Offer！`);
+    } else {
+      // 🌟 如果已经存在（例如 Agent 预先创建的），则更新其状态和 doc_id
+      const { error } = await supabaseAdmin
+        .from('octo_offers')
+        .update({ 
+          status: 'pending_seller_signature',
+          signwell_doc_id: documentId 
+        })
+        .match({ id: existingOffer.id });
+        
+      if (error) throw error;
+      console.log(`✅ 成功更新已有 Offer [${existingOffer.id}] 状态为待卖家签署！`);
+    }
 
-      // 3.5 🌟 通知代理/卖家：买家已签署协议
-      const { data: prop } = await supabaseAdmin
-        .from('octo_properties')
-        .select('author_id')
-        .eq('id', propertyId)
-        .single();
-      
-      if (prop) {
-        await supabaseAdmin.from('notifications').insert({
-          receiver_id: prop.author_id,
-          actor_id: buyerId,
-          type: 'offer_signed_buyer',
-          reference_id: propertyId,
-          is_read: false
-        });
-      }
+    // 3.5 🌟 通知代理/卖家：买家已签署协议
+    const { data: prop } = await supabaseAdmin
+      .from('octo_properties')
+      .select('author_id')
+      .eq('id', propertyId)
+      .single();
+    
+    if (prop) {
+      await supabaseAdmin.from('notifications').insert({
+        receiver_id: prop.author_id,
+        actor_id: buyerId,
+        type: 'offer_signed_buyer',
+        reference_id: propertyId,
+        is_read: false
+      });
     }
 
     // 4. 🌟 返回一段自动关闭弹窗的 HTML！

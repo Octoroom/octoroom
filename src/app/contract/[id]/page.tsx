@@ -138,6 +138,26 @@ function ContractContent() {
 
         if (!isUserSeller || offer.status === 'accepted' || offer.status === 'sold') {
           setStep(3);
+        } else if (!isUserSeller && offer.status === 'pending_buyer_signature' && offer.signwell_doc_id) {
+          // 🌟 核心逻辑：如果是买家，且有待签署的 Offer，直接获取签署链接并跳转到 Step 2
+          setLoading(true);
+          try {
+            const res = await fetch('/api/signwell/get-url', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ documentId: offer.signwell_doc_id, role: 'buyer_id' })
+            });
+            const urlData = await res.json();
+            if (urlData.signUrl) {
+              setSignUrl(urlData.signUrl);
+              setDocumentId(offer.signwell_doc_id);
+              setStep(2);
+            }
+          } catch (err) {
+            console.error("无法自动获取签署链接:", err);
+          } finally {
+            setLoading(false);
+          }
         }
       } else if (!isSeller) {
         // New offer draft: load from session storage
@@ -273,10 +293,10 @@ function ContractContent() {
         const { data: offer } = await supabase.from('octo_offers').select('signwell_doc_id').eq('id', offerId).single();
         if (!offer || !offer.signwell_doc_id) throw new Error('未能找到此出价关联的签署文档');
           
-        const response = await fetch('/api/signwell/seller', {
+        const response = await fetch('/api/signwell/get-url', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ documentId: offer.signwell_doc_id })
+          body: JSON.stringify({ documentId: offer.signwell_doc_id, role: 'seller_id' })
         });
         const data = await response.json();
         
