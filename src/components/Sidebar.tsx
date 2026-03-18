@@ -16,6 +16,13 @@ interface PopularCity {
   roomCount: number;     
 }
 
+// 🌟 硬编码你的三个专属测试账号
+const TEST_ACCOUNTS = [
+  { id: '655c3f63-7d68-4ef4-9baa-f0ac29291bd6', role: 'Buyer', icon: '👤', label: '买家 (Buyer)' },
+  { id: '49635b9a-23b7-403a-b82f-515685c19816', role: 'Agent', icon: '👔', label: '中介 (Agent)' },
+  { id: 'f83482f8-ecaa-4e06-8e6a-1c6698eb1f4e', role: 'Seller', icon: '🏠', label: '卖家 (Seller)' },
+];
+
 export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { isSignedIn } = useLocalAuth();
   const { t, lang } = useLanguage();
@@ -24,13 +31,20 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
   const [isLoadingCities, setIsLoadingCities] = useState(true);
   
   const [unreadMsgCount, setUnreadMsgCount] = useState(0);
-  
-  // 🌟 修改：分为房东未读(收到的订单) 和 房客未读(发出的预定)
   const [hostUnreadCount, setHostUnreadCount] = useState(0);
   const [guestUnreadCount, setGuestUnreadCount] = useState(0);
-
-  // 🌟 新增：互动通知未读数量 (点赞、关注、收藏)
   const [notificationCount, setNotificationCount] = useState(0);
+
+  // 状态：记录当前登录的用户 ID 和 管理员状态
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isSwitchingRole, setIsSwitchingRole] = useState(false);
+
+  // 🌟 核心修复逻辑：判断当前用户是否是三个测试号之一
+  const isTestAccount = TEST_ACCOUNTS.some(acc => acc.id === currentUserId);
+  
+  // 🌟 核心修复逻辑：只要是管理员【或者】是测试号，就显示切换面板！
+  const showSwitcher = isAdmin || isTestAccount;
 
   useEffect(() => {
     async function fetchPopularCities() {
@@ -61,97 +75,97 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
   useEffect(() => {
     let isMounted = true;
     
+    // 获取当前用户信息并记录 ID
+    const fetchCurrentUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && isMounted) {
+        setCurrentUserId(user.id);
+      }
+    };
+
     // 1. 查未读私信
     const fetchUnreadCount = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
       const { count, error } = await supabase
         .from('messages')
         .select('*', { count: 'exact', head: true })
         .eq('is_read', false)
         .neq('sender_id', user.id);
-
-      if (!error && count !== null && isMounted) {
-        setUnreadMsgCount(count);
-      }
+      if (!error && count !== null && isMounted) setUnreadMsgCount(count);
     };
 
     // 2. 查房东未读的订单
     const fetchHostUnread = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
       const { count, error } = await supabase
         .from('octo_bookings')
         .select('*', { count: 'exact', head: true })
         .eq('host_id', user.id)
         .eq('host_unread', true);
-
-      if (!error && count !== null && isMounted) {
-        setHostUnreadCount(count);
-      }
+      if (!error && count !== null && isMounted) setHostUnreadCount(count);
     };
 
     // 3. 查房客未读的订单
     const fetchGuestUnread = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
       const { count, error } = await supabase
         .from('octo_bookings')
         .select('*', { count: 'exact', head: true })
         .eq('guest_id', user.id)
         .eq('guest_unread', true);
-
-      if (!error && count !== null && isMounted) {
-        setGuestUnreadCount(count);
-      }
+      if (!error && count !== null && isMounted) setGuestUnreadCount(count);
     };
 
-    // 🌟 4. 查互动通知未读
+    // 4. 查互动通知未读
     const fetchNotificationUnread = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
       const { count, error } = await supabase
         .from('notifications')
         .select('*', { count: 'exact', head: true })
         .eq('receiver_id', user.id)
         .eq('is_read', false);
+      if (!error && count !== null && isMounted) setNotificationCount(count);
+    };
 
-      if (!error && count !== null && isMounted) {
-        setNotificationCount(count);
+    // 5. 查当前用户的权限和角色
+    const fetchUserRoleAndAdminStatus = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('is_admin')
+        .eq('id', user.id)
+        .single();
+      if (!error && data && isMounted) {
+        setIsAdmin(!!data.is_admin);
       }
     };
 
     if (isSignedIn) {
+      fetchCurrentUser();
       fetchUnreadCount();
       fetchHostUnread();
       fetchGuestUnread();
-      fetchNotificationUnread(); // 调用新写的拉取函数
+      fetchNotificationUnread(); 
+      fetchUserRoleAndAdminStatus(); 
 
       const channel = supabase.channel('global_unread_badge')
-        // 监听私信表变动
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
-          fetchUnreadCount();
-        })
-        // 监听订单表变动，同时刷新双方的红点
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => fetchUnreadCount())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'octo_bookings' }, () => {
           fetchHostUnread();
           fetchGuestUnread();
         })
-        // 🌟 监听通知表变动
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => {
-          fetchNotificationUnread();
-        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => fetchNotificationUnread())
         .subscribe();
 
-      // 接收各个页面发出的消灭红点广播
       const handleLocalRead = (e: any) => setUnreadMsgCount(prev => Math.max(0, prev - (e.detail?.readCount || 0)));
       const handleHostOrdersRead = (e: any) => setHostUnreadCount(prev => Math.max(0, prev - (e.detail?.count || 0)));
       const handleGuestOrdersRead = (e: any) => setGuestUnreadCount(prev => Math.max(0, prev - (e.detail?.count || 0)));
-      const handleNotificationsRead = (e: any) => setNotificationCount(prev => Math.max(0, prev - (e.detail?.count || 0))); // 🌟 本地擦除红点
+      const handleNotificationsRead = (e: any) => setNotificationCount(prev => Math.max(0, prev - (e.detail?.count || 0))); 
       
       window.addEventListener('local_messages_read', handleLocalRead);
       window.addEventListener('local_host_orders_read', handleHostOrdersRead);
@@ -178,6 +192,36 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
       localStorage.removeItem('octo_room_auth');
       localStorage.removeItem('octo_room_user_id');
       window.location.href = '/'; 
+    }
+  };
+
+  // 一键切换测试账号
+  const handleTestAccountSwitch = async (targetUserId: string) => {
+    if (!targetUserId || targetUserId === currentUserId) return;
+
+    setIsSwitchingRole(true);
+    try {
+      const res = await fetch('/api/impersonate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUserId }),
+      });
+      
+      const data = await res.json();
+      
+      if (data.link) {
+        await supabase.auth.signOut();
+        localStorage.removeItem('octo_room_auth');
+        localStorage.removeItem('octo_room_user_id');
+        window.location.href = data.link; 
+      } else {
+        alert("切换失败: " + (data.error || "未知错误"));
+        setIsSwitchingRole(false);
+      }
+    } catch (e) {
+      console.error("模拟登录失败", e);
+      alert("API 请求失败，请检查网络或后端的 /api/impersonate 接口");
+      setIsSwitchingRole(false);
     }
   };
 
@@ -276,7 +320,7 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
               <span>{t('nav.albums')}</span>
             </Link>
 
-            {/* 🌟 房东的红点：我的房源 */}
+            {/* 房东的红点：我的房源 */}
             <Link href="/my-rooms" onClick={onMenuClick} className="flex items-center space-x-4 px-4 py-2.5 rounded-full hover:bg-gray-200/50 transition-all text-[16px] font-medium text-gray-900 w-fit pr-6 group relative">
               <div className="relative">
                 <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
@@ -305,7 +349,7 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
               <span>{t('nav.myMarks')}</span>
             </Link>
 
-            {/* 🌟 房客的红点：我的预定 */}
+            {/* 房客的红点：我的预定 */}
             <Link href="/my-bookings" onClick={onMenuClick} className="flex items-center space-x-4 px-4 py-2.5 rounded-full hover:bg-gray-200/50 transition-all text-[16px] font-medium text-gray-900 w-fit pr-6 group relative">
               <div className="relative">
                 <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
@@ -320,7 +364,7 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
               <span className={guestUnreadCount > 0 ? 'font-bold text-gray-900' : ''}>{t('nav.myBookings')}</span>
             </Link>
 
-            {/* 🌟 新增：互动通知 */}
+            {/* 互动通知 */}
             <Link href="/notifications" onClick={onMenuClick} className="flex items-center space-x-4 px-4 py-2.5 rounded-full hover:bg-gray-200/50 transition-all text-[16px] font-medium text-gray-900 w-fit pr-6 group relative">
               <div className="relative">
                 <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
@@ -353,7 +397,44 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
       </div>
 
       {isSignedIn && (
-        <div className="pt-4 mt-auto flex-shrink-0 relative z-10">
+        <div className="pt-4 mt-auto flex-shrink-0 relative z-10 w-full flex flex-col space-y-4">
+          
+          {/* 🌟 核心：只要是管理员 或 测试号其中之一，就展示这块面板！ */}
+          {showSwitcher && (
+            <div className="bg-white/60 backdrop-blur-sm border border-indigo-200 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
+              <div className="flex items-center gap-2 mb-3">
+                <svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-indigo-500">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+                <h3 className="text-[13px] font-bold text-gray-800 tracking-wide">测试号一键切换</h3>
+              </div>
+              
+              <div className="flex flex-col space-y-2">
+                {TEST_ACCOUNTS.map((account) => {
+                  const isCurrent = account.id === currentUserId;
+                  return (
+                    <button
+                      key={account.id}
+                      disabled={isSwitchingRole || isCurrent}
+                      onClick={() => handleTestAccountSwitch(account.id)}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                        isCurrent 
+                          ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 cursor-default'
+                          : 'bg-white border border-gray-200 text-gray-600 hover:border-indigo-400 hover:text-indigo-600 disabled:opacity-50'
+                      }`}
+                    >
+                      <span>{account.icon} {account.label}</span>
+                      {isCurrent && <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full">当前</span>}
+                    </button>
+                  );
+                })}
+                {isSwitchingRole && <span className="text-[11px] text-indigo-500 animate-pulse mt-1 text-center">正在获取通行证...</span>}
+              </div>
+            </div>
+          )}
+
+          {/* 原有的退出登录按钮 */}
           <button onClick={() => { handleSignOut(); onMenuClick?.(); }} className="flex items-center space-x-4 px-4 py-2.5 rounded-full hover:bg-red-50 hover:text-red-600 transition-all text-base font-medium text-gray-500 group w-fit pr-6">
             <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 group-hover:text-red-600 transition-colors"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" /></svg>
             <span>{t('nav.signOut')}</span>
