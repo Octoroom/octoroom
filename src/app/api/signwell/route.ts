@@ -47,13 +47,26 @@ export async function POST(request: Request) {
     // 从 frontend 传来的 buyerId 可能是 CRM ID，我们需要找到真正的 Auth UUID 以便通知和展示
     let resolvedBuyerId = buyerId;
     try {
-      const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
-      const actualUser = users.find(u => u.email?.toLowerCase() === buyerEmail?.toLowerCase());
-      if (actualUser) {
-        resolvedBuyerId = actualUser.id;
-        console.log(`Resolved buyer ID for ${buyerEmail}: ${resolvedBuyerId}`);
+      // 🌟 Enhanced resolution: Try Profile lookup first (fast & reliable)
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('email', buyerEmail)
+        .maybeSingle();
+
+      if (profile) {
+        resolvedBuyerId = profile.id;
+        console.log(`Resolved buyer ID for ${buyerEmail} via Profiles: ${resolvedBuyerId}`);
       } else {
-         console.warn(`Could not find Auth User for email: ${buyerEmail}. Falling back to provided buyerId: ${buyerId}`);
+        // Fallback: Check Auth directly if Profile doesn't exist yet
+        const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
+        const actualUser = users.find(u => u.email?.toLowerCase() === buyerEmail?.toLowerCase());
+        if (actualUser) {
+          resolvedBuyerId = actualUser.id;
+          console.log(`Resolved buyer ID for ${buyerEmail} via Auth: ${resolvedBuyerId}`);
+        } else {
+          console.warn(`Could not find Auth User or Profile for email: ${buyerEmail}. Falling back to provided buyerId: ${buyerId}`);
+        }
       }
     } catch (err) {
       console.error("Error resolving buyer ID from email:", err);
@@ -151,7 +164,12 @@ export async function POST(request: Request) {
         offerData.conditions = offerTerms.conditions || null;
       }
 
-      const { error: offerError } = await supabaseAdmin.from('octo_offers').insert(offerData);
+      const { data: newOffer, error: offerError } = await supabaseAdmin
+        .from('octo_offers')
+        .insert(offerData)
+        .select('id')
+        .single();
+
       if (offerError) {
         console.error("Error inserting offer:", offerError);
         return NextResponse.json({ error: "无法创建报价记录: " + offerError.message }, { status: 500 });
@@ -163,6 +181,7 @@ export async function POST(request: Request) {
         actor_id: property.author_id, // The agent (property author in this case)
         type: 'offer',
         reference_id: propertyId,
+        metadata: { offer_id: newOffer.id }, // 🚀 CRITICAL: Link to the specific offer
         is_read: false
       });
 

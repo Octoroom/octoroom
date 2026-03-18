@@ -65,6 +65,7 @@ export default function AuthModal() {
           const { error: profileError } = await supabase.from('profiles').upsert({
             id: data.user.id,
             username: username,
+            email: email,
             avatar_url: `https://api.dicebear.com/7.x/adventurer/svg?seed=${data.user.id}`
           });
           if (profileError) console.error('Profile error:', profileError.message);

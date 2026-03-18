@@ -90,6 +90,18 @@ export default function ProfilePage() {
       setUser(user);
 
       const { data: profileData } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      
+      // 🌟 自动托底修复：如果 profile 表里没邮箱，但 auth 里有，自动同步过去 (Fix for legacy users missing emails)
+      if (profileData && !profileData.email && user.email) {
+        const { error: syncError } = await supabase
+          .from('profiles')
+          .update({ email: user.email })
+          .eq('id', user.id);
+        if (!syncError) {
+          profileData.email = user.email;
+        }
+      }
+      
       setProfile(profileData);
 
       const [ followingRes, followersRes, likesRes, bookmarksRes, postsRes, myPostsRes ] = await Promise.all([

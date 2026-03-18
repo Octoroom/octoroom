@@ -2,10 +2,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { Users, FileText, CheckCircle2, ChevronRight, Share2, Plus, MessageSquare, Phone, Building2, MapPin, Search, Calendar, History, Sparkles, AlertCircle, Camera, Check, Link, Upload, ExternalLink, RefreshCw, Send, Trash2, ArrowUp, ArrowDown, Mic } from 'lucide-react';
+import { FollowUpModal } from '@/components/workspace/FollowUpModal';
 import { supabase } from '@/lib/supabase';
 
 // --- 🌟 Types & Interfaces ---
-type ProviderStatus = 'WORKING' | 'PENDING' | 'LOOKING' | 'DONE';
+type ProviderStatus = string; // Relaxed to allow dynamic AI statuses
 
 interface Condition {
   id: string;
@@ -46,6 +48,10 @@ interface ManagedProperty {
   id: string;
   address: string;
   vendor: string;
+  sellerId?: string;
+  sellerEmail?: string;
+  sellerAvatar?: string;
+  sellerProfileId?: string;
   image: string;
   status: 'ACTIVE' | 'SOLD' | 'WITHDRAWN';
   activeBuyers: number;
@@ -93,10 +99,13 @@ function MondayStatusBadge({ status }: { status: ProviderStatus }) {
     LOOKING: { text: '寻找中', color: 'bg-[#c4c4c4] text-white' }, 
   };
 
-  const config = statusConfig[status];
+  const config = statusConfig[status as keyof typeof statusConfig] || {
+    text: status, 
+    color: 'bg-orange-500 text-white shadow-orange-100' // Default fallback for AI statuses
+  };
 
   return (
-    <div className={`flex items-center justify-center w-[72px] h-[30px] rounded-[4px] text-[12px] font-bold tracking-wide shadow-sm transition-all hover:opacity-90 cursor-pointer ${config.color}`}>
+    <div className={`flex items-center justify-center min-w-[72px] px-2 h-[30px] rounded-[4px] text-[12px] font-bold tracking-wide shadow-sm transition-all hover:opacity-90 cursor-pointer whitespace-nowrap ${config.color}`}>
       {config.text}
     </div>
   );
@@ -158,7 +167,8 @@ const MOCKED_ACTIVITY: Record<string, ActivityLog[]> = {};
 
 export default function AgentWorkspacePage() {
   const router = useRouter();
-  const [selectedPropertyId, setSelectedPropertyId] = useState(MOCKED_PROPERTIES[0].id);
+  const [managedProperties, setManagedProperties] = useState<ManagedProperty[]>([]);
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string>('');
   const [expandedBuyerId, setExpandedBuyerId] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [isAuthorizing, setIsAuthorizing] = useState(true);
@@ -170,6 +180,8 @@ export default function AgentWorkspacePage() {
   const [activityCache, setActivityCache] = useState<Record<string, ActivityLog[]>>({});
   const [orderedPipeline, setOrderedPipeline] = useState<Buyer[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [isFollowUpModalOpen, setIsFollowUpModalOpen] = useState(false);
+  const [activeFollowUpBuyer, setActiveFollowUpBuyer] = useState<Buyer | null>(null);
 
   // Update orderedPipeline whenever mocked or cloud buyers change
   useEffect(() => {
@@ -217,9 +229,9 @@ export default function AgentWorkspacePage() {
     solicitor_id: ''
   });
 
-  const currentProperty = MOCKED_PROPERTIES.find(p => p.id === selectedPropertyId)!;
+  const currentProperty = managedProperties.find(p => p.id === selectedPropertyId) || managedProperties[0];
   // Combine mocked pipeline with cloud-synced buyers
-  const pipeline = [...(MOCKED_PIPELINE[selectedPropertyId] || []), ...cloudBuyers];
+  const pipeline = (selectedPropertyId && MOCKED_PIPELINE[selectedPropertyId] ? [...MOCKED_PIPELINE[selectedPropertyId], ...cloudBuyers] : [...cloudBuyers]);
 
   useEffect(() => {
     async function fetchCloudBuyers(agentId: string) {
@@ -251,6 +263,118 @@ export default function AgentWorkspacePage() {
       setLoadingCloudData(false);
     }
 
+    async function fetchManagedProperties(agentId: string) {
+      // 1. Fetch all sellers for this agent to get their property addresses
+      const { data: sellers } = await supabase
+        .from('crm_contacts')
+        .select('*')
+        .eq('agent_id', agentId)
+        .eq('type', 'SELLER');
+
+      const sellerAddresses = sellers?.map((s: any) => s.address).filter(Boolean) || [];
+
+      // 2. Fetch properties where agent is author OR address matches a CRM seller
+      let query = supabase
+        .from('octo_properties')
+        .select('*');
+      
+      if (sellerAddresses.length > 0) {
+        query = query.or(`author_id.eq.${agentId},address_name.in.(${sellerAddresses.map((a: string) => `"${a}"`).join(',')})`);
+      } else {
+        query = query.eq('author_id', agentId);
+      }
+
+      const { data: props, error } = await query;
+
+      if (error) {
+        console.error("Fetch properties failed:", error);
+        return;
+      }
+
+      if (props && props.length > 0) {
+        // --- 🔍 Fetch profiles for matched sellers using case-insensitive ilike ---
+        const sellerEmails = sellers?.map((s: any) => s.email).filter(Boolean) || [];
+        
+        let profiles: any[] = [];
+        if (sellerEmails.length > 0) {
+          // 🔍 Try to find by email (using ilike)
+          const orFilter = sellerEmails.map((email: string) => `email.ilike.${email}`).join(',');
+          const { data: emailMatches } = await supabase
+            .from('profiles')
+            .select('id, email, username')
+            .or(orFilter);
+            
+          profiles = [...(emailMatches || [])];
+          
+          // 🔍 FALLBACK: Try to find by the seller's names in the CRM (just in case they registered with a different email)
+          const sellerNames = sellers?.map((s: any) => s.name).filter(Boolean) || [];
+          if (sellerNames.length > 0) {
+            const nameFilter = sellerNames.map((name: string) => `username.ilike.%${name}%`).join(',');
+            const { data: nameMatches } = await supabase
+              .from('profiles')
+              .select('id, email, username')
+              .or(nameFilter);
+            
+            // Add unique name matches to profiles list
+            if (nameMatches) {
+              nameMatches.forEach((nm: any) => {
+                if (!profiles.find((p: any) => p.id === nm.id)) profiles.push(nm);
+              });
+            }
+          }
+        }
+
+        console.log('[DEBUG_WORKSPACE] All potentially matched profiles found:', profiles);
+
+        const mapped: ManagedProperty[] = props.map((p: any) => {
+          // Robust address matching (trimmed and case-insensitive)
+          const propAddr = (p.address_name || p.title || '').trim().toLowerCase();
+          const seller = sellers?.find((s: any) => {
+            const sellerAddr = (s.address || '').trim().toLowerCase();
+            return sellerAddr === propAddr && propAddr !== '';
+          });
+
+          // Robust mapping
+          let profile = profiles.find((pr: any) => 
+            pr.email?.toLowerCase() === seller?.email?.toLowerCase() && seller?.email
+          );
+          
+          // Fallback to username matching if email didn't hit
+          if (!profile && seller) {
+            profile = profiles.find((pr: any) => 
+              pr.username?.toLowerCase().includes(seller.name.toLowerCase()) ||
+              seller.name.toLowerCase().includes(pr.username?.toLowerCase() || '')
+            );
+          }
+
+          // 🔍 DEBUG: Log the result for the agent to check in console
+          if (seller) {
+            console.log(`[DEBUG_WORKSPACE] Property "${propAddr}" matched seller "${seller.name}" (${seller.email || 'no email'}). Profile linked: ${profile?.id ? `YES (username: ${profile.username})` : 'NO'}`);
+          }
+
+          return {
+            id: p.id,
+            address: p.address_name || p.title,
+            vendor: seller ? seller.name : (p.author_name || '房东'),
+            sellerId: seller ? seller.id : undefined,
+            sellerEmail: seller ? seller.email : undefined,
+            sellerAvatar: seller ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${seller.name}` : undefined,
+            sellerProfileId: profile ? profile.id : undefined,
+            image: p.cover_image ? p.cover_image.split(',')[0] : 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80',
+            status: p.status === 'active' ? 'ACTIVE' : (p.status === 'sold' ? 'SOLD' : 'WITHDRAWN'),
+            activeBuyers: 0, 
+            scheduledViewings: 0,
+            themeColor: '#0086c0'
+          };
+        });
+
+        setManagedProperties(mapped);
+        if (mapped.length > 0 && !selectedPropertyId) {
+          setSelectedPropertyId(mapped[0].id);
+        }
+      }
+    }
+
     async function checkAuth() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
@@ -258,7 +382,8 @@ export default function AgentWorkspacePage() {
         return;
       }
       setCurrentAgentId(session.user.id);
-      fetchCloudBuyers(session.user.id); // Fetch real buyers here
+      fetchCloudBuyers(session.user.id);
+      fetchManagedProperties(session.user.id); // Fetch real properties here
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
       setUserRole(profile?.role || null);
       setIsAuthorizing(false);
@@ -274,15 +399,109 @@ export default function AgentWorkspacePage() {
 
   // --- 🌟 Fetch Real Activities for Transaction Timeline ---
   useEffect(() => {
-    const selectedBuyer = pipeline.find(b => b.id === expandedBuyerId);
-    if (expandedBuyerId && selectedPropertyId && currentAgentId && selectedBuyer) {
-      fetchRealActivities(selectedBuyer);
-    }
-  }, [expandedBuyerId, selectedPropertyId, currentAgentId]);
+    if (!selectedPropertyId || !currentAgentId) return;
 
-  const fetchRealActivities = async (buyer: Buyer) => {
+    if (expandedBuyerId) {
+      const selectedBuyer = pipeline.find(b => b.id === expandedBuyerId);
+      if (selectedBuyer) {
+        fetchRealActivities(selectedBuyer);
+      }
+    } else {
+      // 🏘️ Fetch Property-Level activities (Seller context)
+      if (currentProperty && currentProperty.sellerEmail) {
+        fetchRealActivities({
+          id: currentProperty.sellerId || '',
+          name: currentProperty.vendor,
+          email: currentProperty.sellerEmail,
+          phone: '',
+          maxBudget: '',
+          financeStatus: 'UNAPPROVED',
+          status: 'WORKING',
+          conditions: [],
+          offerHistory: [],
+          lastFollowUp: '',
+          nextAction: '',
+          roleDescription: 'Seller'
+        });
+      }
+    }
+  }, [expandedBuyerId, selectedPropertyId, currentAgentId, currentProperty]);
+
+  // --- 🛰️ Real-time Subscriptions for Activities & Status ---
+  useEffect(() => {
+    if (!currentAgentId) return;
+
+    // 1. Listen for CRM Contact Updates (for status bar real-time sync)
+    const contactChannel = supabase
+      .channel('crm_status_updates')
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'crm_contacts',
+        filter: `agent_id=eq.${currentAgentId}`
+      }, (payload) => {
+        console.log('[REALTIME] CRM Contact Updated:', payload);
+        const updated = payload.new as any;
+        setCloudBuyers(prev => prev.map(b => b.id === updated.id ? { ...b, status: updated.status } : b));
+      })
+      .subscribe();
+
+    // 2. Listen for Activity Updates (Notifications & Notes)
+    const activityChannel = supabase
+      .channel('activity_stream')
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'notifications',
+        filter: `reference_id=eq.${selectedPropertyId}`
+      }, () => {
+        console.log('[REALTIME] New Notification - Refreshing Activities');
+        // Clear appropriate cache and refresh
+        if (expandedBuyerId) {
+          const buyer = pipeline.find(b => b.id === expandedBuyerId);
+          if (buyer) {
+            setActivityCache(prev => {
+              const nc = { ...prev };
+              delete nc[buyer.id];
+              return nc;
+            });
+            fetchRealActivities(buyer, true);
+          }
+        } else {
+           // Refresh property-level activities
+           fetchRealActivities({ id: currentProperty?.sellerId || '', email: currentProperty?.sellerEmail || '' } as any, true);
+        }
+      })
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'crm_notes',
+        filter: `property_id=eq.${selectedPropertyId}`
+      }, () => {
+        console.log('[REALTIME] New CRM Note - Refreshing Activities');
+        if (expandedBuyerId) {
+          const buyer = pipeline.find(b => b.id === expandedBuyerId);
+          if (buyer) {
+            setActivityCache(prev => {
+              const nc = { ...prev };
+              delete nc[buyer.id];
+              return nc;
+            });
+            fetchRealActivities(buyer, true);
+          }
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(contactChannel);
+      supabase.removeChannel(activityChannel);
+    };
+  }, [currentAgentId, selectedPropertyId, expandedBuyerId, currentProperty]);
+
+  const fetchRealActivities = async (buyer: Buyer, forceRefresh: boolean = false) => {
     // 💡 Instant Cache Check
-    if (activityCache[buyer.id]) {
+    if (!forceRefresh && activityCache[buyer.id]) {
       setActivities(activityCache[buyer.id]);
       return;
     }
@@ -298,7 +517,7 @@ export default function AgentWorkspacePage() {
           type: (n.type === 'offer' || n.type.startsWith('offer_')) ? 'OFFER' : 'NOTE',
           content: n.content || mapNotifToText(n.type),
           timestamp: new Date(n.created_at).toLocaleString(),
-          agentName: '系统推送'
+          agentName: n.source === 'crm_note' ? '代理跟进' : '系统推送'
         }));
         setActivities(mapped);
         // 🚀 Update Cache
@@ -342,6 +561,87 @@ export default function AgentWorkspacePage() {
     setOrderedPipeline(newPipeline);
     persistOrder(newPipeline);
     setDraggedIndex(null);
+  };
+
+  const handleSaveFollowUp = async (summary: string, transcript: string, recommendedStatus?: string) => {
+    if (!activeFollowUpBuyer) return;
+    const isSeller = activeFollowUpBuyer.roleDescription === 'Seller';
+    
+    try {
+      // 1. Post to activities API (handles notes/summaries)
+      const res = await fetch('/api/workspace/activities', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          propertyId: selectedPropertyId,
+          buyerId: activeFollowUpBuyer.id,
+          buyerEmail: activeFollowUpBuyer.email,
+          agentId: currentAgentId,
+          type: 'followup_ai',
+          content: summary,
+          metadata: { 
+            transcript,
+            recommendedStatus,
+            recipientRole: isSeller ? 'Seller' : 'Buyer'
+          }
+        })
+      });
+
+      if (res.ok) {
+        // 2. Clear activity cache for this buyer FIRST to ensure next fetch is fresh
+        setActivityCache(prev => {
+          const newCache = { ...prev };
+          delete newCache[activeFollowUpBuyer.id];
+          return newCache;
+        });
+
+        // 3. Update CRM contact status if AI recommended one (SKIP FOR SELLERS & MOCK BUYERS)
+        const isCloudBuyer = activeFollowUpBuyer.roleDescription === 'Cloud Client';
+        if (recommendedStatus && !isSeller && isCloudBuyer) {
+           const { error: updateError } = await supabase
+             .from('crm_contacts')
+             .update({ status: recommendedStatus })
+             .eq('id', activeFollowUpBuyer.id);
+             
+           if (updateError) {
+             console.error("Failed to update CRM status in Supabase:", updateError);
+           }
+        }
+
+        // 4. Refresh data for this contact (force refresh)
+        fetchRealActivities(activeFollowUpBuyer, true);
+        
+        // 5. Refresh cloud contacts to update the status badge on the dashboard
+        if (currentAgentId && !isSeller) {
+          const { data: updatedData } = await supabase
+            .from('crm_contacts')
+            .select('*')
+            .eq('agent_id', currentAgentId)
+            .eq('type', 'BUYER');
+            
+          if (updatedData) {
+            const mapped: Buyer[] = updatedData.map((c: any) => ({
+              id: c.id,
+              name: c.name,
+              email: c.email,
+              phone: c.phone || '',
+              maxBudget: '$0 (Synced)',
+              financeStatus: 'UNAPPROVED',
+              status: c.status || 'PENDING',
+              conditions: [],
+              offerHistory: [],
+              lastFollowUp: 'N/A',
+              nextAction: 'Synced from CRM',
+              roleDescription: 'Cloud Client',
+              company: c.address || 'Unknown Address'
+            }));
+            setCloudBuyers(mapped);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Save follow-up failed:", err);
+    }
   };
 
   const mapNotifToText = (type: string) => {
@@ -460,18 +760,126 @@ export default function AgentWorkspacePage() {
           <div className="bg-white rounded-[20px] border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
             <div className="flex items-center gap-4 p-4">
                <div className="w-1.5 h-12 rounded-full shrink-0 bg-black" />
-               <div className="w-16 h-16 rounded-xl bg-cover bg-center shrink-0 border border-gray-100 shadow-inner" style={{ backgroundImage: `url(${currentProperty.image})` }} />
+               <div className="w-16 h-16 rounded-xl bg-cover bg-center shrink-0 border border-gray-100 shadow-inner" style={{ backgroundImage: `url(${currentProperty?.image || ''})` }} />
                <div className="flex-1 truncate">
-                  <h3 className="text-[16px] font-black text-gray-900 truncate tracking-tight">{currentProperty.address}</h3>
-                  <p className="text-[12px] font-bold text-gray-400 mt-0.5 uppercase tracking-wider">业主: {currentProperty.vendor}</p>
+                   <h3 className="text-[16px] font-black text-gray-900 truncate tracking-tight">{currentProperty?.address || '加载中...'}</h3>
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5">
+                        {currentProperty?.sellerAvatar && (
+                          <img 
+                            src={currentProperty.sellerAvatar} 
+                            alt={currentProperty.vendor} 
+                            className="w-4 h-4 rounded-full border border-gray-100 shadow-sm"
+                          />
+                        )}
+                        <p className="text-[12px] font-bold text-gray-400 uppercase tracking-wider">业主: {currentProperty?.vendor || '...'}</p>
+                      </div>
+                      {currentProperty?.sellerEmail && (
+                        <div className="flex items-center gap-1">
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveFollowUpBuyer({
+                                id: currentProperty.sellerId || '',
+                                name: currentProperty.vendor,
+                                email: currentProperty.sellerEmail || '',
+                                phone: '',
+                                maxBudget: '',
+                                financeStatus: 'UNAPPROVED',
+                                status: 'WORKING',
+                                conditions: [],
+                                offerHistory: [],
+                                lastFollowUp: '',
+                                nextAction: '',
+                                roleDescription: 'Seller'
+                              });
+                              setIsFollowUpModalOpen(true);
+                            }}
+                            className="p-1 hover:bg-gray-100 rounded-full transition-colors group"
+                            title="记录业主跟进 (Record Seller Note)"
+                          >
+                            <Mic className="w-3 h-3 text-gray-300 group-hover:text-blue-500" />
+                          </button>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (currentProperty.sellerProfileId) {
+                                router.push(`/messages?chatWith=${currentProperty.sellerProfileId}`);
+                              } else {
+                                alert(`该房东 (${currentProperty.vendor}) 尚未注册 Octoroom 账户，暂时无法站内私信。\n(验证邮箱: ${currentProperty.sellerEmail || '无'})`);
+                              }
+                            }}
+                            className="p-1 hover:bg-gray-100 rounded-full transition-colors group"
+                            title={currentProperty.sellerProfileId ? "发送私信 (Send Message)" : "房东未注册账户"}
+                          >
+                            <MessageSquare className={`w-3 h-3 ${currentProperty.sellerProfileId ? 'text-blue-500 group-hover:text-blue-600' : 'text-gray-300 group-hover:text-gray-400'}`} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                </div>
                <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-full border border-gray-100 shrink-0">
                   <CategoryIcon id="STATS" className="w-3.5 h-3.5 text-black" />
-                  <span className="text-[12px] font-black text-gray-700">{currentProperty.activeBuyers} 意向人</span>
+                   <span className="text-[12px] font-black text-gray-700">{currentProperty?.activeBuyers || 0} 意向人</span>
                </div>
             </div>
           </div>
         </div>
+
+        {/* --- 🏘️ Property & Seller Unified Timeline (Shown when no buyer expanded) --- */}
+        {!expandedBuyerId && (
+          <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-500">
+            <div className="flex items-center justify-between pl-1 pr-1">
+              <div className="flex items-center gap-2">
+                <History className="w-4 h-4 text-gray-400" />
+                <h4 className="text-[12px] font-black text-gray-400 uppercase tracking-widest">房源动态及业主沟通 (Property Timeline)</h4>
+              </div>
+              <span className="text-[10px] font-bold text-gray-300 uppercase">Live Update</span>
+            </div>
+
+            {loadingActivities ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-3 bg-gray-50/50 rounded-[24px] border border-gray-100">
+                <div className="w-6 h-6 border-2 border-gray-200 border-t-black rounded-full animate-spin"></div>
+                <span className="text-[11px] font-bold text-gray-400">正在同步房源流水...</span>
+              </div>
+            ) : activities.length > 0 ? (
+              <div className="space-y-4 relative before:absolute before:left-[19px] before:top-4 before:bottom-4 before:w-[2px] before:bg-gray-100/60">
+                {activities.map((log, idx) => (
+                  <div key={log.id} className="relative pl-12 group">
+                    <div className={`absolute left-0 top-1.5 w-[40px] h-[40px] rounded-full border-4 border-gray-50 flex items-center justify-center z-10 transition-transform group-hover:scale-110 ${idx === 0 ? 'bg-black text-white shadow-xl shadow-gray-200' : 'bg-white text-gray-400 border-gray-100'}`}>
+                       {idx === 0 ? (
+                         <Sparkles className="w-4 h-4" />
+                       ) : (
+                         <div className="w-2 h-2 rounded-full bg-gray-200" />
+                       )}
+                    </div>
+                    <div className="p-5 bg-white rounded-[24px] border border-gray-100 shadow-sm transition-all hover:border-gray-200 hover:shadow-md">
+                       <div className="flex justify-between items-center mb-2">
+                          <span className={`text-[10px] font-black uppercase tracking-wider ${idx === 0 ? 'text-black' : 'text-gray-400'}`}>
+                            {idx === 0 ? '房源新动态' : '历史轨迹'}
+                          </span>
+                          <span className="text-[10px] font-bold text-gray-300">{log.timestamp}</span>
+                       </div>
+                       <p className="text-[14px] font-bold text-gray-800 leading-relaxed">{log.content}</p>
+                       <div className="mt-2 flex items-center gap-1.5 opacity-40">
+                         <div className="w-3 h-3 rounded-full bg-gray-200" />
+                         <span className="text-[10px] font-black text-gray-500 uppercase tracking-tight">{log.agentName}</span>
+                       </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-16 text-center bg-gray-50/50 rounded-[32px] border-2 border-dashed border-gray-200/50">
+                <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm">
+                   <History className="w-6 h-6 text-gray-200" />
+                </div>
+                <p className="text-[13px] font-black text-gray-400">暂无房源动态或业主沟通记录</p>
+                <p className="text-[10px] font-bold text-gray-300 mt-1 uppercase">Start recording notes to see them here</p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* --- Buyers Pipeline Section --- */}
         <div className="flex flex-col gap-3">
@@ -569,9 +977,17 @@ export default function AgentWorkspacePage() {
                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                              生成出价 (Create Offer)
                           </button>
-                          <button className="flex-1 bg-white text-black border-2 border-gray-100 font-black py-3 rounded-2xl hover:bg-gray-50 active:scale-95 transition-all shadow-sm text-[13px] tracking-tight">
-                             记录跟进 note
-                          </button>
+                           <button 
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               setActiveFollowUpBuyer(buyer);
+                               setIsFollowUpModalOpen(true);
+                             }}
+                             className="flex-1 bg-white text-black border-2 border-gray-100 font-black py-3 rounded-2xl hover:bg-gray-50 active:scale-95 transition-all shadow-sm text-[13px] tracking-tight flex items-center justify-center gap-2"
+                           >
+                              <Mic className="w-4 h-4 text-gray-400" />
+                              记录跟进 note
+                           </button>
                        </div>
 
                        <div className="space-y-4">
@@ -698,6 +1114,18 @@ export default function AgentWorkspacePage() {
             </form>
           </div>
         </div>
+      )}
+
+      {activeFollowUpBuyer && (
+        <FollowUpModal 
+          isOpen={isFollowUpModalOpen}
+          onClose={() => {
+            setIsFollowUpModalOpen(false);
+            setActiveFollowUpBuyer(null);
+          }}
+          buyerName={activeFollowUpBuyer.name}
+          onSave={(summary: string, transcript: string, recommendedStatus?: string) => handleSaveFollowUp(summary, transcript, recommendedStatus)}
+        />
       )}
 
     </main>

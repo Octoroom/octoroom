@@ -82,7 +82,33 @@ function ContractContent() {
         offerQuery = offerQuery.eq('buyer_id', user.id);
       }
       
-      const { data: offer } = await offerQuery.maybeSingle();
+      const { data: offerData, error: offerError } = await offerQuery.maybeSingle();
+      let offer = offerData;
+
+      // --- 🌉 Fallback: Bridge CRM ID and Auth ID ---
+      if (!offer && !urlOfferId && user.email) {
+        console.log("[CONTRACT] No offer found by Auth ID, trying CRM ID fallback for:", user.email);
+        const { data: contact } = await supabase
+          .from('crm_contacts')
+          .select('id')
+          .eq('email', user.email)
+          .maybeSingle();
+          
+        if (contact) {
+          console.log("[CONTRACT] Found CRM Contact ID:", contact.id);
+          const { data: crmOffer } = await supabase
+            .from('octo_offers')
+            .select('*')
+            .eq('property_id', propertyId)
+            .eq('buyer_id', contact.id)
+            .maybeSingle();
+            
+          if (crmOffer) {
+            console.log("[CONTRACT] Successfully found offer via CRM ID!");
+            offer = crmOffer;
+          }
+        }
+      }
 
       // --- 🔄 Load Terms Logic ---
       if (offer) {

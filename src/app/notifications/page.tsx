@@ -167,7 +167,10 @@ export default function NotificationsPage() {
                     key={notif.id} 
                     onClick={() => {
                       if (notif.type === 'follow') router.push(`/user/${notif.actor_id}`);
-                      else if (notif.type === 'offer') router.push(`/property/${notif.reference_id}?tab=WORKFLOW`);
+                      else if (notif.type === 'offer') {
+                        const offerId = notif.metadata?.offer_id;
+                        router.push(`/contract/${notif.reference_id}${offerId ? `?offerId=${offerId}` : ''}`);
+                      }
                       else router.push(`/post/${notif.reference_id}`);
                     }}
                     className={`flex items-center gap-3 p-4 cursor-pointer hover:bg-gray-50 transition-colors bg-white ${!notif.is_read ? 'bg-orange-50/20' : ''} ${index !== filteredNotifs.length - 1 ? 'border-b border-gray-50' : ''}`}
