@@ -18,9 +18,9 @@ interface PopularCity {
 
 // 🌟 硬编码你的三个专属测试账号
 const TEST_ACCOUNTS = [
-  { id: '655c3f63-7d68-4ef4-9baa-f0ac29291bd6', role: 'Buyer', icon: '👤', label: '买家 (Buyer)' },
-  { id: '49635b9a-23b7-403a-b82f-515685c19816', role: 'Agent', icon: '👔', label: '中介 (Agent)' },
-  { id: 'f83482f8-ecaa-4e06-8e6a-1c6698eb1f4e', role: 'Seller', icon: '🏠', label: '卖家 (Seller)' },
+  { id: '655c3f63-7d68-4ef4-9baa-f0ac29291bd6', role: 'Buyer', icon: '', label: '买家 (Buyer)' },
+  { id: '49635b9a-23b7-403a-b82f-515685c19816', role: 'Agent', icon: '', label: '中介 (Agent)' },
+  { id: 'f83482f8-ecaa-4e06-8e6a-1c6698eb1f4e', role: 'Seller', icon: '', label: '卖家 (Seller)' },
 ];
 
 export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
