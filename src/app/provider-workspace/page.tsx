@@ -65,6 +65,8 @@ interface Lawyer {
   username: string;
 }
 
+type WorkspaceView = 'summary' | 'pipeline';
+
 // --- 🎨 Components from Providers Page Style ---
 function CategoryIcon({ id, className = "w-4 h-4" }: { id: string, className?: string }) {
   switch (id) {
@@ -192,6 +194,7 @@ const MOCKED_ACTIVITY: Record<string, ActivityLog[]> = {};
 
 export default function AgentWorkspacePage() {
   const router = useRouter();
+  const [activeView, setActiveView] = useState<WorkspaceView>('summary');
   const [managedProperties, setManagedProperties] = useState<ManagedProperty[]>([]);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string>('');
   const [expandedBuyerId, setExpandedBuyerId] = useState<string | null>(null);
@@ -791,6 +794,33 @@ export default function AgentWorkspacePage() {
       </div>
 
       <div className="p-4 space-y-8 pb-28">
+        <div className="bg-white rounded-[20px] border border-gray-100 shadow-sm p-2">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => {
+                setActiveView('summary');
+                setExpandedBuyerId(null);
+              }}
+              className={`rounded-2xl px-4 py-3 text-[13px] font-black transition-all ${
+                activeView === 'summary'
+                  ? 'bg-black text-white shadow-lg shadow-gray-200'
+                  : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+              }`}
+            >
+              Sales Summary
+            </button>
+            <button
+              onClick={() => setActiveView('pipeline')}
+              className={`rounded-2xl px-4 py-3 text-[13px] font-black transition-all ${
+                activeView === 'pipeline'
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
+                  : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+              }`}
+            >
+              Buyer Pipeline
+            </button>
+          </div>
+        </div>
         {/* --- Featured Property Section --- */}
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 mb-1 pl-1">
@@ -871,7 +901,7 @@ export default function AgentWorkspacePage() {
         </div>
 
         {/* --- 🏘️ Property & Seller Unified Timeline (Shown when no buyer expanded) --- */}
-        {!expandedBuyerId && (
+        {activeView === 'summary' && !expandedBuyerId && (
           <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-500">
             <div className="flex items-center justify-between pl-1 pr-1">
               <div className="flex items-center gap-2">
@@ -926,6 +956,7 @@ export default function AgentWorkspacePage() {
         )}
 
         {/* --- Buyers Pipeline Section --- */}
+        {activeView === 'pipeline' && (
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 mb-1 pl-1">
             <div className="w-[22px] h-[22px] rounded-[6px] bg-blue-600 flex items-center justify-center shadow-sm text-white">
@@ -1084,6 +1115,7 @@ export default function AgentWorkspacePage() {
             })}
           </div>
         </div>
+        )}
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 max-w-[640px] mx-auto bg-gradient-to-t from-white via-white/95 to-transparent p-4 pb-8 z-40 backdrop-blur-sm">
