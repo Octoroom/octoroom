@@ -29,7 +29,7 @@ interface Buyer {
   name: string;
   email: string;
   phone: string;
-  maxBudget: string;
+  infoBadge: string;
   financeStatus: 'CASH' | 'CONDITIONAL' | 'UNAPPROVED';
   status: ProviderStatus;
   conditions: Condition[];
@@ -63,6 +63,22 @@ interface Lawyer {
   id: string;
   full_name: string;
   username: string;
+}
+
+interface OfferRow {
+  id: string;
+  buyer_id: string;
+  status: string;
+  offer_price: number | null;
+  created_at: string;
+}
+
+interface FollowUpNoteRow {
+  buyer_id: string;
+  created_at: string;
+  metadata?: {
+    recommendedStatus?: string;
+  } | null;
 }
 
 type WorkspaceView = 'summary' | 'pipeline';
@@ -159,7 +175,7 @@ const MOCKED_PIPELINE: Record<string, Buyer[]> = {
       name: 'Alice Johnson',
       email: 'alice.j@example.com',
       phone: '021 123 4567',
-      maxBudget: '$1,950,000',
+      infoBadge: '$1,950,000',
       financeStatus: 'CONDITIONAL',
       status: 'WORKING',
       roleDescription: 'Cash Buyer (Approved)',
@@ -177,7 +193,7 @@ const MOCKED_PIPELINE: Record<string, Buyer[]> = {
       name: 'David Chen',
       email: 'david.c@example.com',
       phone: '022 987 6543',
-      maxBudget: '$1,800,000',
+      infoBadge: '$1,800,000',
       financeStatus: 'CASH',
       status: 'PENDING',
       roleDescription: 'First Home Buyer',
@@ -213,7 +229,9 @@ export default function AgentWorkspacePage() {
 
   // Update orderedPipeline whenever mocked or cloud buyers change
   useEffect(() => {
-    const basePipeline = [...(MOCKED_PIPELINE[selectedPropertyId] || []), ...cloudBuyers];
+    const basePipeline = cloudBuyers.length > 0
+      ? [...cloudBuyers]
+      : [...(MOCKED_PIPELINE[selectedPropertyId] || [])];
     
     // 🧠 Load persisted order from localStorage
     const savedOrder = localStorage.getItem(`octoroom_pipeline_order_${selectedPropertyId}`);
@@ -265,6 +283,11 @@ export default function AgentWorkspacePage() {
     return `$${Number(price).toLocaleString()}`;
   };
 
+  const getLatestRecommendedStatus = (notes: FollowUpNoteRow[] | null | undefined) => {
+    const latestRecommended = (notes || []).find((note) => note?.metadata?.recommendedStatus);
+    return latestRecommended?.metadata?.recommendedStatus || null;
+  };
+
   const loadCloudBuyers = async (agentId: string, propertyId?: string) => {
     setLoadingCloudData(true);
 
@@ -288,8 +311,9 @@ export default function AgentWorkspacePage() {
       (profiles || []).map((profile: { id: string; email: string }) => [profile.email.toLowerCase(), profile.id])
     );
 
-    let offers: any[] = [];
+    let offers: OfferRow[] = [];
     let offerBuyerEmailById = new Map<string, string>();
+    let notes: FollowUpNoteRow[] = [];
     if (propertyId) {
       const { data: offerRows } = await supabase
         .from('octo_offers')
@@ -299,7 +323,7 @@ export default function AgentWorkspacePage() {
 
       offers = offerRows || [];
 
-      const offerBuyerIds = [...new Set(offers.map((offer: any) => offer.buyer_id).filter(Boolean))];
+      const offerBuyerIds = [...new Set(offers.map((offer) => offer.buyer_id).filter(Boolean))];
       if (offerBuyerIds.length > 0) {
         const { data: offerBuyerProfiles } = await supabase
           .from('profiles')
@@ -312,33 +336,48 @@ export default function AgentWorkspacePage() {
             .map((profile: { id: string; email: string }) => [profile.id, profile.email.toLowerCase()])
         );
       }
+
+      const { data: noteRows } = await supabase
+        .from('crm_notes')
+        .select('buyer_id, created_at, metadata')
+        .eq('property_id', propertyId)
+        .eq('type', 'ai_summary')
+        .order('created_at', { ascending: false });
+
+      notes = noteRows || [];
     }
 
     const mappedBuyers: Buyer[] = contacts.map((contact: any) => {
       const authBuyerId = contact.email ? profileIdByEmail.get(contact.email.toLowerCase()) : null;
       const normalizedEmail = contact.email?.toLowerCase();
-      const latestOffer = offers.find((offer: any) =>
+      const latestOffer = offers.find((offer) =>
         offer.buyer_id === authBuyerId ||
         offer.buyer_id === contact.id ||
         (!!normalizedEmail && offerBuyerEmailById.get(offer.buyer_id) === normalizedEmail)
       );
+      const buyerNotes = notes.filter((note) =>
+        note.buyer_id === authBuyerId || note.buyer_id === contact.id
+      );
+      const latestRecommendedStatus = getLatestRecommendedStatus(buyerNotes);
+      const latestContactStatus = latestRecommendedStatus || contact.status || 'PENDING';
+      const unifiedStatus = (latestOffer?.status as ProviderStatus) || (latestContactStatus as ProviderStatus);
 
       return {
         id: contact.id,
         name: contact.name,
         email: contact.email,
         phone: contact.phone || '',
-        maxBudget: formatOfferPrice(latestOffer?.offer_price),
+        infoBadge: latestOffer ? formatOfferPrice(latestOffer.offer_price) : latestContactStatus,
         financeStatus: 'UNAPPROVED',
-        status: (latestOffer?.status as ProviderStatus) || (contact.status as ProviderStatus) || 'PENDING',
+        status: unifiedStatus,
         conditions: [],
         offerHistory: latestOffer ? [{
           status: latestOffer.status === 'accepted' ? 'ACCEPTED' : latestOffer.status === 'pending_seller_signature' ? 'SENT' : latestOffer.status === 'pending_buyer_signature' ? 'DRAFT' : latestOffer.status === 'rejected' ? 'NEGOTIATING' : 'DRAFT',
           date: new Date(latestOffer.created_at).toLocaleString(),
           price: formatOfferPrice(latestOffer.offer_price),
         }] : [],
-        lastFollowUp: 'N/A',
-        nextAction: latestOffer ? `Latest OA status: ${latestOffer.status}` : 'No OA created yet',
+        lastFollowUp: buyerNotes[0]?.created_at ? new Date(buyerNotes[0].created_at).toLocaleString() : 'N/A',
+        nextAction: latestOffer ? `Latest OA status: ${latestOffer.status}` : `Latest follow-up: ${latestContactStatus}`,
         roleDescription: latestOffer ? 'Offer Synced' : 'Cloud Client',
         company: contact.address || 'Unknown Address'
       };
@@ -348,8 +387,10 @@ export default function AgentWorkspacePage() {
     setLoadingCloudData(false);
   };
 
-  // Combine mocked pipeline with cloud-synced buyers
-  const pipeline = (selectedPropertyId && MOCKED_PIPELINE[selectedPropertyId] ? [...MOCKED_PIPELINE[selectedPropertyId], ...cloudBuyers] : [...cloudBuyers]);
+  // Prefer cloud-synced buyers whenever they exist so real-time updates are not masked by mock data.
+  const pipeline = cloudBuyers.length > 0
+    ? [...cloudBuyers]
+    : (selectedPropertyId && MOCKED_PIPELINE[selectedPropertyId] ? [...MOCKED_PIPELINE[selectedPropertyId]] : []);
 
   useEffect(() => {
     async function fetchManagedProperties(agentId: string) {
@@ -535,7 +576,7 @@ export default function AgentWorkspacePage() {
           name: currentProperty.vendor,
           email: currentProperty.sellerEmail,
           phone: '',
-          maxBudget: '',
+          infoBadge: '',
           financeStatus: 'UNAPPROVED',
           status: 'WORKING',
           conditions: [],
@@ -726,6 +767,18 @@ export default function AgentWorkspacePage() {
              
            if (updateError) {
              console.error("Failed to update CRM status in Supabase:", updateError);
+           } else {
+             setCloudBuyers(prev => prev.map((buyer) =>
+               buyer.id === activeFollowUpBuyer.id
+                 ? {
+                     ...buyer,
+                     infoBadge: buyer.offerHistory.length > 0 ? buyer.infoBadge : recommendedStatus,
+                     status: buyer.offerHistory.length > 0 ? buyer.status : recommendedStatus,
+                     lastFollowUp: new Date().toLocaleString(),
+                     nextAction: `Latest follow-up: ${recommendedStatus}`,
+                   }
+                 : buyer
+             ));
            }
         }
 
@@ -909,8 +962,8 @@ export default function AgentWorkspacePage() {
                                 id: currentProperty.sellerId || '',
                                 name: currentProperty.vendor,
                                 email: currentProperty.sellerEmail || '',
-                                phone: '',
-                                maxBudget: '',
+          phone: '',
+          infoBadge: '',
                                 financeStatus: 'UNAPPROVED',
                                 status: 'WORKING',
                                 conditions: [],
@@ -1081,7 +1134,7 @@ export default function AgentWorkspacePage() {
                       <div className="flex flex-col truncate">
                         <span className="text-[14px] font-black text-gray-900 truncate tracking-tight">{buyer.name}</span>
                         <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500 mt-0.5 truncate">
-                          <span className="bg-white px-2 py-0.5 rounded-full text-gray-600 shrink-0 border border-gray-100 shadow-sm">{buyer.maxBudget}</span>
+                          <span className="bg-white px-2 py-0.5 rounded-full text-gray-600 shrink-0 border border-gray-100 shadow-sm">{buyer.infoBadge}</span>
                           <span className="truncate opacity-70 uppercase tracking-wide">{buyer.roleDescription}</span>
                         </div>
                       </div>
