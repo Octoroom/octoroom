@@ -338,7 +338,7 @@ const WorkflowTimelineTab = ({ propertyId, property, setActiveTab, currentUserRo
                       onClick={() => {
                         if (step.id === 'step_1' && isPendingBuyer) {
                           // 买家去签署
-                          router.push(`/contract/${propertyId}`);
+                          router.push(`/contract/${propertyId}?offerId=${offer.id}`);
                         } else if (step.role === 'SELLER') {
                           // 卖家点击，带上 offerId 去合同页签署
                           router.push(`/contract/${propertyId}?offerId=${offer.id}`);

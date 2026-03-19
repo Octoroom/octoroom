@@ -79,7 +79,10 @@ function ContractContent() {
       if (urlOfferId) {
         offerQuery = offerQuery.eq('id', urlOfferId);
       } else {
-        offerQuery = offerQuery.eq('buyer_id', user.id);
+        offerQuery = offerQuery
+          .eq('buyer_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(1);
       }
       
       const { data: offerData, error: offerError } = await offerQuery.maybeSingle();
@@ -101,6 +104,8 @@ function ContractContent() {
             .select('*')
             .eq('property_id', propertyId)
             .eq('buyer_id', contact.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
             .maybeSingle();
             
           if (crmOffer) {
