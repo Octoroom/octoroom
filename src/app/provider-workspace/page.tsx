@@ -81,6 +81,20 @@ interface FollowUpNoteRow {
   } | null;
 }
 
+interface CRMContactRow {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string | null;
+  address?: string | null;
+  status?: string | null;
+  budget?: string | number | null;
+  budget_amount?: string | number | null;
+  max_budget?: string | number | null;
+  buying_budget?: string | number | null;
+  price_range?: string | number | null;
+}
+
 type WorkspaceView = 'summary' | 'pipeline';
 
 // --- 🎨 Components from Providers Page Style ---
@@ -271,6 +285,7 @@ export default function AgentWorkspacePage() {
     email: '',
     phone: '',
     address: '',
+    budget_amount: '',
     type: 'BUYER',
     solicitor_id: ''
   });
@@ -281,6 +296,31 @@ export default function AgentWorkspacePage() {
       return 'No Offer Yet';
     }
     return `$${Number(price).toLocaleString()}`;
+  };
+
+  const formatBudgetAmount = (value: string | number | null | undefined) => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'number') return `$${value.toLocaleString()}`;
+
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const numericValue = Number(trimmed.replace(/[^0-9.]/g, ''));
+    if (!Number.isNaN(numericValue) && numericValue > 0) {
+      return `$${numericValue.toLocaleString()}`;
+    }
+
+    return trimmed;
+  };
+
+  const getBuyerBudgetLabel = (contact: CRMContactRow) => {
+    return formatBudgetAmount(
+      contact.budget_amount ??
+      contact.max_budget ??
+      contact.buying_budget ??
+      contact.budget ??
+      contact.price_range
+    );
   };
 
   const getLatestRecommendedStatus = (notes: FollowUpNoteRow[] | null | undefined) => {
@@ -347,7 +387,7 @@ export default function AgentWorkspacePage() {
       notes = noteRows || [];
     }
 
-    const mappedBuyers: Buyer[] = contacts.map((contact: any) => {
+    const mappedBuyers: Buyer[] = contacts.map((contact: CRMContactRow) => {
       const authBuyerId = contact.email ? profileIdByEmail.get(contact.email.toLowerCase()) : null;
       const normalizedEmail = contact.email?.toLowerCase();
       const latestOffer = offers.find((offer) =>
@@ -361,13 +401,14 @@ export default function AgentWorkspacePage() {
       const latestRecommendedStatus = getLatestRecommendedStatus(buyerNotes);
       const latestContactStatus = latestRecommendedStatus || contact.status || 'PENDING';
       const unifiedStatus = (latestOffer?.status as ProviderStatus) || (latestContactStatus as ProviderStatus);
+      const buyerBudgetLabel = getBuyerBudgetLabel(contact);
 
       return {
         id: contact.id,
         name: contact.name,
         email: contact.email,
         phone: contact.phone || '',
-        infoBadge: latestOffer ? formatOfferPrice(latestOffer.offer_price) : latestContactStatus,
+        infoBadge: latestOffer ? formatOfferPrice(latestOffer.offer_price) : (buyerBudgetLabel || latestContactStatus),
         financeStatus: 'UNAPPROVED',
         status: unifiedStatus,
         conditions: [],
@@ -833,6 +874,7 @@ export default function AgentWorkspacePage() {
         email: formData.email,
         phone: formData.phone,
         address: formData.address,
+        budget_amount: formData.type === 'BUYER' && formData.budget_amount ? Number(formData.budget_amount) : null,
         type: formData.type,
         solicitor_id: formData.solicitor_id || null,
         status: 'PENDING'
@@ -843,7 +885,7 @@ export default function AgentWorkspacePage() {
       alert('同步失败，请确保您已经在 Supabase 中创建了 crm_contacts 表。');
     } else {
       setIsModalOpen(false);
-      setFormData({ name: '', email: '', phone: '', address: '', type: 'BUYER', solicitor_id: '' });
+      setFormData({ name: '', email: '', phone: '', address: '', budget_amount: '', type: 'BUYER', solicitor_id: '' });
       alert('客户已成功同步到云端 CRM！');
     }
     
@@ -1286,6 +1328,20 @@ export default function AgentWorkspacePage() {
                   {lawyers.map(l => ( <option key={l.id} value={l.id}>{l.full_name || l.username}</option> ))}
                 </select>
               </div>
+              {formData.type === 'BUYER' && (
+                <div>
+                  <label className="block text-[11px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-1">Budget Amount</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1000"
+                    placeholder="e.g. 1200000"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-[14px] font-bold focus:ring-2 focus:ring-blue-500 focus:outline-none focus:bg-white transition-all"
+                    value={formData.budget_amount}
+                    onChange={e => setFormData({...formData, budget_amount: e.target.value})}
+                  />
+                </div>
+              )}
               <div className="pt-4 flex gap-3">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-3 text-[14px] font-black text-gray-500">取消</button>
                 <button type="submit" disabled={formLoading} className="flex-[2] py-3 bg-blue-600 text-white rounded-xl text-[14px] font-black shadow-lg shadow-blue-100 hover:bg-blue-700 active:scale-95 transition-all">

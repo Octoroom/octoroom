@@ -15,6 +15,7 @@ interface Contact {
   email: string;
   phone: string;
   address?: string;
+  budget_amount?: number | null;
   solicitor_id?: string;
   status: ProviderStatus;
   created_at: string;
@@ -84,6 +85,7 @@ export default function CRMPage() {
     email: '',
     phone: '',
     address: '',
+    budget_amount: '',
     type: 'BUYER' as ContactType,
     solicitor_id: ''
   });
@@ -144,6 +146,7 @@ export default function CRMPage() {
         email: formData.email,
         phone: formData.phone,
         address: formData.address,
+        budget_amount: formData.type === 'BUYER' && formData.budget_amount ? Number(formData.budget_amount) : null,
         type: formData.type,
         solicitor_id: formData.solicitor_id || null,
         status: 'PENDING'
@@ -157,7 +160,7 @@ export default function CRMPage() {
     } else if (data) {
       setContacts([data as Contact, ...contacts]);
       setIsModalOpen(false);
-      setFormData({ name: '', email: '', phone: '', address: '', type: 'BUYER', solicitor_id: '' });
+      setFormData({ name: '', email: '', phone: '', address: '', budget_amount: '', type: 'BUYER', solicitor_id: '' });
     }
     
     setFormLoading(false);
@@ -332,6 +335,20 @@ export default function CRMPage() {
                   </select>
                 </div>
               </div>
+              {formData.type === 'BUYER' && (
+                <div>
+                  <label className="block text-[12px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-1">Budget Amount</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1000"
+                    placeholder="e.g. 1200000"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-[14px] font-bold focus:ring-2 focus:ring-blue-500 focus:outline-none focus:bg-white transition-all"
+                    value={formData.budget_amount}
+                    onChange={e => setFormData({...formData, budget_amount: e.target.value})}
+                  />
+                </div>
+              )}
               <div className="pt-4">
                 <button type="submit" disabled={formLoading} className="w-full py-3 bg-blue-600 text-white rounded-xl text-[14px] font-black shadow-lg shadow-blue-100 hover:bg-blue-700 active:scale-95 transition-all text-center">
                   {formLoading ? '正在同步到云端...' : '确认同步到数据库'}
