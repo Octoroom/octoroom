@@ -99,12 +99,6 @@ function MondayStatusBadge({ status }: { status: ProviderStatus }) {
     LOOKING: { text: '寻找中', color: 'bg-[#c4c4c4] text-white' }, 
   };
 
-  statusConfig.pending_buyer_signature = { text: 'å¾…ä¹°å®¶ç­¾ç½²', color: 'bg-[#0ea5e9] text-white' } as any;
-  statusConfig.pending_seller_signature = { text: 'å¾…å–å®¶ç­¾ç½²', color: 'bg-[#f97316] text-white' } as any;
-  statusConfig.accepted = { text: 'å·²æŽ¥å—', color: 'bg-[#16a34a] text-white' } as any;
-  statusConfig.sold = { text: 'å·²æˆäº¤', color: 'bg-[#15803d] text-white' } as any;
-  statusConfig.rejected = { text: 'å·²æ‹’ç»', color: 'bg-[#dc2626] text-white' } as any;
-
   const config = statusConfig[status as keyof typeof statusConfig] || {
     text: status, 
     color: 'bg-orange-500 text-white shadow-orange-100' // Default fallback for AI statuses
