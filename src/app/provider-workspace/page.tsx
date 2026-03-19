@@ -22,6 +22,9 @@ interface ActivityLog {
   content: string;
   timestamp: string;
   agentName: string;
+  avatarUrl?: string;
+  buyerName?: string;
+  amountLabel?: string;
 }
 
 interface Buyer {
@@ -711,7 +714,10 @@ export default function AgentWorkspacePage() {
 
     setLoadingActivities(true);
     try {
-      const res = await fetch(`/api/workspace/activities?propertyId=${selectedPropertyId}&buyerEmail=${buyer.email}&buyerId=${buyer.id}`);
+      const query = buyer.roleDescription === 'Seller'
+        ? `/api/workspace/activities?propertyId=${selectedPropertyId}&viewerId=${currentAgentId || ''}`
+        : `/api/workspace/activities?propertyId=${selectedPropertyId}&buyerEmail=${buyer.email}&buyerId=${buyer.id}&viewerId=${currentAgentId || ''}`;
+      const res = await fetch(query);
       const data = await res.json();
 
       if (data.activities && Array.isArray(data.activities)) {
@@ -720,7 +726,10 @@ export default function AgentWorkspacePage() {
           type: (n.type === 'offer' || n.type.startsWith('offer_')) ? 'OFFER' : 'NOTE',
           content: n.content || mapNotifToText(n.type),
           timestamp: new Date(n.created_at).toLocaleString(),
-          agentName: n.source === 'crm_note' ? '代理跟进' : '系统推送'
+          agentName: n.source === 'crm_note' ? '代理跟进' : (n.buyer_name || '系统推送'),
+          avatarUrl: n.avatar_url,
+          buyerName: n.buyer_name,
+          amountLabel: n.amount_label
         }));
         setActivities(mapped);
         // 🚀 Update Cache
@@ -1067,8 +1076,10 @@ export default function AgentWorkspacePage() {
               <div className="space-y-4 relative before:absolute before:left-[19px] before:top-4 before:bottom-4 before:w-[2px] before:bg-gray-100/60">
                 {activities.map((log, idx) => (
                   <div key={log.id} className="relative pl-12 group">
-                    <div className={`absolute left-0 top-1.5 w-[40px] h-[40px] rounded-full border-4 border-gray-50 flex items-center justify-center z-10 transition-transform group-hover:scale-110 ${idx === 0 ? 'bg-black text-white shadow-xl shadow-gray-200' : 'bg-white text-gray-400 border-gray-100'}`}>
-                       {idx === 0 ? (
+                    <div className={`absolute left-0 top-1.5 w-[40px] h-[40px] rounded-full border-4 border-gray-50 flex items-center justify-center z-10 overflow-hidden transition-transform group-hover:scale-110 ${idx === 0 ? 'bg-black text-white shadow-xl shadow-gray-200' : 'bg-white text-gray-400 border-gray-100'}`}>
+                       {log.avatarUrl ? (
+                         <img src={log.avatarUrl} alt={log.buyerName || log.agentName} className="w-full h-full object-cover" />
+                       ) : idx === 0 ? (
                          <Sparkles className="w-4 h-4" />
                        ) : (
                          <div className="w-2 h-2 rounded-full bg-gray-200" />
@@ -1082,9 +1093,15 @@ export default function AgentWorkspacePage() {
                           <span className="text-[10px] font-bold text-gray-300">{log.timestamp}</span>
                        </div>
                        <p className="text-[14px] font-bold text-gray-800 leading-relaxed">{log.content}</p>
+                       {(log.buyerName || log.amountLabel) && (
+                         <div className="mt-2 flex items-center gap-2 text-[11px] font-bold text-gray-500">
+                           {log.buyerName && <span>{log.buyerName}</span>}
+                           {log.amountLabel && <span className="px-2 py-0.5 rounded-full bg-gray-50 border border-gray-100 text-gray-700">{log.amountLabel}</span>}
+                         </div>
+                       )}
                        <div className="mt-2 flex items-center gap-1.5 opacity-40">
-                         <div className="w-3 h-3 rounded-full bg-gray-200" />
-                         <span className="text-[10px] font-black text-gray-500 uppercase tracking-tight">{log.agentName}</span>
+                          <div className="w-3 h-3 rounded-full bg-gray-200" />
+                          <span className="text-[10px] font-black text-gray-500 uppercase tracking-tight">{log.agentName}</span>
                        </div>
                     </div>
                   </div>
