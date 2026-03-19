@@ -385,7 +385,7 @@ export default function MyPropertiesPage() {
         floor_area: formData.floorArea, land_area: formData.landArea,
         sale_method: formData.saleMethod, price_display: finalPriceDisplay, raw_price: formData.priceAmount,
         features: formData.features.join(','), description: formData.description,
-        cover_image: coverImageString, status: 'active'
+        cover_image: coverImageString, status: 'active', workspace_visible: true
       }]).select().single();
 
       if (insertError) throw insertError;

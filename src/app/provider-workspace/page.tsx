@@ -447,23 +447,36 @@ export default function AgentWorkspacePage() {
 
       const sellerAddresses = sellers?.map((s: any) => s.address).filter(Boolean) || [];
 
-      // 2. Fetch properties where agent is author OR address matches a CRM seller
-      let query = supabase
+      // 2. Fetch agent-posted workspace listings and CRM seller-linked listings separately.
+      const { data: authorProps, error: authorPropsError } = await supabase
         .from('octo_properties')
-        .select('*');
-      
-      if (sellerAddresses.length > 0) {
-        query = query.or(`author_id.eq.${agentId},address_name.in.(${sellerAddresses.map((a: string) => `"${a}"`).join(',')})`);
-      } else {
-        query = query.eq('author_id', agentId);
-      }
+        .select('*')
+        .eq('author_id', agentId)
+        .eq('workspace_visible', true);
 
-      const { data: props, error } = await query;
-
-      if (error) {
-        console.error("Fetch properties failed:", error);
+      if (authorPropsError) {
+        console.error("Fetch author workspace properties failed:", authorPropsError);
         return;
       }
+
+      let sellerMatchedProps: any[] = [];
+      if (sellerAddresses.length > 0) {
+        const { data, error: sellerMatchedPropsError } = await supabase
+          .from('octo_properties')
+          .select('*')
+          .in('address_name', sellerAddresses);
+
+        if (sellerMatchedPropsError) {
+          console.error("Fetch seller-matched properties failed:", sellerMatchedPropsError);
+          return;
+        }
+
+        sellerMatchedProps = data || [];
+      }
+
+      const props = [...(authorProps || []), ...sellerMatchedProps].filter(
+        (prop, index, arr) => arr.findIndex((item) => item.id === prop.id) === index
+      );
 
       if (props && props.length > 0) {
         // --- 🔍 Fetch profiles for matched sellers using case-insensitive ilike ---
