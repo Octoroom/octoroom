@@ -1077,6 +1077,49 @@ export default function AgentWorkspacePage() {
               )}
             </div>
           </div>
+
+          {managedProperties.filter(property => property.id !== currentProperty?.id).map((property) => (
+            <div
+              key={property.id}
+              onClick={() => setSelectedPropertyId(property.id)}
+              className="bg-white rounded-[20px] border border-gray-100 shadow-sm overflow-hidden hover:shadow-md hover:border-gray-200 transition-all cursor-pointer"
+            >
+              <div className="flex items-center gap-4 p-4">
+                <div className="w-1.5 h-12 rounded-full shrink-0 bg-gray-200" />
+                <div className="w-16 h-16 rounded-xl bg-cover bg-center shrink-0 border border-gray-100 shadow-inner" style={{ backgroundImage: `url(${property.image || ''})` }} />
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-[16px] font-black text-gray-900 truncate tracking-tight">{property.address || 'Loading...'}</h3>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {property.sellerAvatar && (
+                        <img
+                          src={property.sellerAvatar}
+                          alt={property.vendor}
+                          className="w-4 h-4 rounded-full border border-gray-100 shadow-sm"
+                        />
+                      )}
+                      <p className="text-[12px] font-bold text-gray-400 uppercase tracking-wider truncate">Owner: {property.vendor || '...'}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-full border border-gray-100">
+                    <CategoryIcon id="STATS" className="w-3.5 h-3.5 text-black" />
+                    <span className="text-[12px] font-black text-gray-700">{property.activeBuyers || 0} Intent</span>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleWorkspaceProperty(property.id, false);
+                    }}
+                    className="px-3 py-1.5 rounded-full border border-red-200 bg-red-50 text-red-600 text-[12px] font-black hover:bg-red-100 transition-colors"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
 
         {/* --- 🏘️ Property & Seller Unified Timeline (Shown when no buyer expanded) --- */}
