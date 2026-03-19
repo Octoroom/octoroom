@@ -150,7 +150,7 @@ function ContractContent() {
           setToxDays(offer.conditions.toxicology?.toString() || '15');
         }
 
-        if (!isUserSeller || offer.status === 'accepted' || offer.status === 'sold') {
+        if ((!isUserSeller && offer.status !== 'pending_buyer_signature') || offer.status === 'accepted' || offer.status === 'sold') {
           setStep(3);
         } else if (!isUserSeller && offer.status === 'pending_buyer_signature' && offer.signwell_doc_id) {
           // 🌟 核心逻辑：如果是买家，且有待签署的 Offer，直接获取签署链接并跳转到 Step 2

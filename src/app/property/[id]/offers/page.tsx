@@ -60,6 +60,7 @@ export default function SellerOffersPage() {
         .from('octo_offers')
         .select('*')
         .eq('property_id', propertyId)
+        .in('status', ['pending_seller_signature', 'accepted', 'sold', 'rejected'])
         .order('created_at', { ascending: false });
 
       if (offersError) {
