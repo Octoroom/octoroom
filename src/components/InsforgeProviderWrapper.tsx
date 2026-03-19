@@ -1,10 +1,11 @@
-'use client'; 
+'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
 
-const AuthContext = createContext<{ isSignedIn: boolean; loading: boolean }>({ 
-  isSignedIn: false, 
-  loading: true 
+const AuthContext = createContext<{ isSignedIn: boolean; loading: boolean }>({
+  isSignedIn: false,
+  loading: true,
 });
 
 export default function InsforgeProviderWrapper({
@@ -16,10 +17,50 @@ export default function InsforgeProviderWrapper({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 🌟 终极暴力托底：只认我们自己写的通行证标识
-    const hasPass = localStorage.getItem('octo_room_auth') === 'true';
-    setIsSignedIn(hasPass);
-    setLoading(false);
+    let isMounted = true;
+
+    const syncLocalAuth = (signedIn: boolean, userId?: string | null) => {
+      if (signedIn) {
+        localStorage.setItem('octo_room_auth', 'true');
+        if (userId) {
+          localStorage.setItem('octo_room_user_id', userId);
+        }
+        return;
+      }
+
+      localStorage.removeItem('octo_room_auth');
+      localStorage.removeItem('octo_room_user_id');
+    };
+
+    const initializeAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!isMounted) return;
+
+      if (session?.user) {
+        syncLocalAuth(true, session.user.id);
+        setIsSignedIn(true);
+      } else {
+        setIsSignedIn(localStorage.getItem('octo_room_auth') === 'true');
+      }
+
+      setLoading(false);
+    };
+
+    initializeAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!isMounted) return;
+
+      const signedIn = !!session?.user;
+      syncLocalAuth(signedIn, session?.user?.id);
+      setIsSignedIn(signedIn);
+      setLoading(false);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   return (

@@ -217,12 +217,17 @@ export default function Sidebar({ onMenuClick }: { onMenuClick?: () => void }) {
         localStorage.removeItem('octo_room_user_id');
         
         // 🌟 3. 在后台静默执行账号密码登录（完美绕过 SSR 丢失 Token 的问题）
-        const { error: signInError } = await supabase.auth.signInWithPassword({
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
           email: data.email,
           password: data.password,
         });
 
         if (signInError) throw signInError;
+        const switchedUserId = signInData?.user?.id || signInData?.session?.user?.id;
+        if (switchedUserId) {
+          localStorage.setItem('octo_room_user_id', switchedUserId);
+        }
+        localStorage.setItem('octo_room_auth', 'true');
 
         // 4. 登录成功，刷新页面以加载新身份的数据！
         window.location.href = '/'; 
