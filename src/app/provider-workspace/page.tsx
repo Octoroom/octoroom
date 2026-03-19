@@ -289,6 +289,7 @@ export default function AgentWorkspacePage() {
     );
 
     let offers: any[] = [];
+    let offerBuyerEmailById = new Map<string, string>();
     if (propertyId) {
       const { data: offerRows } = await supabase
         .from('octo_offers')
@@ -297,11 +298,30 @@ export default function AgentWorkspacePage() {
         .order('created_at', { ascending: false });
 
       offers = offerRows || [];
+
+      const offerBuyerIds = [...new Set(offers.map((offer: any) => offer.buyer_id).filter(Boolean))];
+      if (offerBuyerIds.length > 0) {
+        const { data: offerBuyerProfiles } = await supabase
+          .from('profiles')
+          .select('id, email')
+          .in('id', offerBuyerIds);
+
+        offerBuyerEmailById = new Map(
+          (offerBuyerProfiles || [])
+            .filter((profile: { id: string; email: string | null }) => !!profile.email)
+            .map((profile: { id: string; email: string }) => [profile.id, profile.email.toLowerCase()])
+        );
+      }
     }
 
     const mappedBuyers: Buyer[] = contacts.map((contact: any) => {
       const authBuyerId = contact.email ? profileIdByEmail.get(contact.email.toLowerCase()) : null;
-      const latestOffer = offers.find((offer: any) => offer.buyer_id === authBuyerId || offer.buyer_id === contact.id);
+      const normalizedEmail = contact.email?.toLowerCase();
+      const latestOffer = offers.find((offer: any) =>
+        offer.buyer_id === authBuyerId ||
+        offer.buyer_id === contact.id ||
+        (!!normalizedEmail && offerBuyerEmailById.get(offer.buyer_id) === normalizedEmail)
+      );
 
       return {
         id: contact.id,
