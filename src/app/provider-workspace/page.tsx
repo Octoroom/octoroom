@@ -486,6 +486,38 @@ export default function AgentWorkspacePage() {
     fetchLawyers();
   }, [selectedPropertyId]);
 
+  useEffect(() => {
+    if (!currentAgentId || !selectedPropertyId) return;
+
+    const refreshCloudBuyers = () => {
+      loadCloudBuyers(currentAgentId, selectedPropertyId);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshCloudBuyers();
+      }
+    };
+
+    const offersChannel = supabase
+      .channel(`workspace-offers-${selectedPropertyId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'octo_offers', filter: `property_id=eq.${selectedPropertyId}` },
+        refreshCloudBuyers
+      )
+      .subscribe();
+
+    window.addEventListener('focus', refreshCloudBuyers);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', refreshCloudBuyers);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      supabase.removeChannel(offersChannel);
+    };
+  }, [currentAgentId, selectedPropertyId]);
+
   // --- 🌟 Fetch Real Activities for Transaction Timeline ---
   useEffect(() => {
     if (!selectedPropertyId || !currentAgentId) return;
