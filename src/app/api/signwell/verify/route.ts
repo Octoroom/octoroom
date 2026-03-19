@@ -8,7 +8,7 @@ const supabaseAdmin = createClient(
 
 export async function POST(request: Request) {
   try {
-    const { documentId, propertyId, buyerId: userId, isSeller, offerTerms } = await request.json();
+    const { documentId, propertyId, buyerId: userId, agentId, isSeller, offerTerms } = await request.json();
 
     if (!documentId || !propertyId || !userId) {
       return NextResponse.json({ error: "缺少必要参数" }, { status: 400 });
@@ -84,6 +84,37 @@ export async function POST(request: Request) {
           .match({ id: existingOffer.id });
           
         if (error) throw error;
+      }
+
+      const { data: prop } = await supabaseAdmin
+        .from('octo_properties')
+        .select('author_id')
+        .eq('id', propertyId)
+        .single();
+
+      const notificationReceiverId = agentId || prop?.author_id;
+      if (notificationReceiverId) {
+        const { data: existingNotif } = await supabaseAdmin
+          .from('notifications')
+          .select('id')
+          .eq('receiver_id', notificationReceiverId)
+          .eq('actor_id', userId)
+          .eq('type', 'offer_signed_buyer')
+          .eq('reference_id', propertyId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!existingNotif) {
+          await supabaseAdmin.from('notifications').insert({
+            receiver_id: notificationReceiverId,
+            actor_id: userId,
+            type: 'offer_signed_buyer',
+            reference_id: propertyId,
+            metadata: existingOffer ? { offer_id: existingOffer.id } : {},
+            is_read: false
+          });
+        }
       }
     } else {
       // 卖家的话，更新状态为 accepted

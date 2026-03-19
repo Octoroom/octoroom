@@ -99,9 +99,40 @@ function MondayStatusBadge({ status }: { status: ProviderStatus }) {
     LOOKING: { text: '寻找中', color: 'bg-[#c4c4c4] text-white' }, 
   };
 
+  statusConfig.pending_buyer_signature = { text: 'å¾…ä¹°å®¶ç­¾ç½²', color: 'bg-[#0ea5e9] text-white' } as any;
+  statusConfig.pending_seller_signature = { text: 'å¾…å–å®¶ç­¾ç½²', color: 'bg-[#f97316] text-white' } as any;
+  statusConfig.accepted = { text: 'å·²æŽ¥å—', color: 'bg-[#16a34a] text-white' } as any;
+  statusConfig.sold = { text: 'å·²æˆäº¤', color: 'bg-[#15803d] text-white' } as any;
+  statusConfig.rejected = { text: 'å·²æ‹’ç»', color: 'bg-[#dc2626] text-white' } as any;
+
   const config = statusConfig[status as keyof typeof statusConfig] || {
     text: status, 
     color: 'bg-orange-500 text-white shadow-orange-100' // Default fallback for AI statuses
+  };
+
+  return (
+    <div className={`flex items-center justify-center min-w-[72px] px-2 h-[30px] rounded-[4px] text-[12px] font-bold tracking-wide shadow-sm transition-all hover:opacity-90 cursor-pointer whitespace-nowrap ${config.color}`}>
+      {config.text}
+    </div>
+  );
+}
+
+function PipelineStatusBadge({ status }: { status: ProviderStatus }) {
+  const statusConfig: Record<string, { text: string; color: string }> = {
+    WORKING: { text: 'Active', color: 'bg-[#00c875] text-white' },
+    DONE: { text: 'Offer Sent', color: 'bg-[#0086c0] text-white' },
+    PENDING: { text: 'Pending', color: 'bg-[#fdab3d] text-white' },
+    LOOKING: { text: 'Looking', color: 'bg-[#c4c4c4] text-white' },
+    pending_buyer_signature: { text: 'Buyer Sign', color: 'bg-[#0ea5e9] text-white' },
+    pending_seller_signature: { text: 'Seller Sign', color: 'bg-[#f97316] text-white' },
+    accepted: { text: 'Accepted', color: 'bg-[#16a34a] text-white' },
+    sold: { text: 'Sold', color: 'bg-[#15803d] text-white' },
+    rejected: { text: 'Rejected', color: 'bg-[#dc2626] text-white' },
+  };
+
+  const config = statusConfig[status] || {
+    text: status,
+    color: 'bg-orange-500 text-white shadow-orange-100'
   };
 
   return (
@@ -230,39 +261,80 @@ export default function AgentWorkspacePage() {
   });
 
   const currentProperty = managedProperties.find(p => p.id === selectedPropertyId) || managedProperties[0];
+  const formatOfferPrice = (price: number | null | undefined) => {
+    if (price === null || price === undefined || Number.isNaN(Number(price))) {
+      return 'No Offer Yet';
+    }
+    return `$${Number(price).toLocaleString()}`;
+  };
+
+  const loadCloudBuyers = async (agentId: string, propertyId?: string) => {
+    setLoadingCloudData(true);
+
+    const { data: contacts, error: contactsError } = await supabase
+      .from('crm_contacts')
+      .select('*')
+      .eq('agent_id', agentId)
+      .eq('type', 'BUYER');
+
+    if (contactsError || !contacts) {
+      setLoadingCloudData(false);
+      return;
+    }
+
+    const emails = contacts.map((contact: any) => contact.email).filter(Boolean);
+    const { data: profiles } = emails.length > 0
+      ? await supabase.from('profiles').select('id, email').in('email', emails)
+      : { data: [] as { id: string; email: string }[] };
+
+    const profileIdByEmail = new Map(
+      (profiles || []).map((profile: { id: string; email: string }) => [profile.email.toLowerCase(), profile.id])
+    );
+
+    let offers: any[] = [];
+    if (propertyId) {
+      const { data: offerRows } = await supabase
+        .from('octo_offers')
+        .select('id, buyer_id, status, offer_price, created_at')
+        .eq('property_id', propertyId)
+        .order('created_at', { ascending: false });
+
+      offers = offerRows || [];
+    }
+
+    const mappedBuyers: Buyer[] = contacts.map((contact: any) => {
+      const authBuyerId = contact.email ? profileIdByEmail.get(contact.email.toLowerCase()) : null;
+      const latestOffer = offers.find((offer: any) => offer.buyer_id === authBuyerId || offer.buyer_id === contact.id);
+
+      return {
+        id: contact.id,
+        name: contact.name,
+        email: contact.email,
+        phone: contact.phone || '',
+        maxBudget: formatOfferPrice(latestOffer?.offer_price),
+        financeStatus: 'UNAPPROVED',
+        status: (latestOffer?.status as ProviderStatus) || (contact.status as ProviderStatus) || 'PENDING',
+        conditions: [],
+        offerHistory: latestOffer ? [{
+          status: latestOffer.status === 'accepted' ? 'ACCEPTED' : latestOffer.status === 'pending_seller_signature' ? 'SENT' : latestOffer.status === 'pending_buyer_signature' ? 'DRAFT' : latestOffer.status === 'rejected' ? 'NEGOTIATING' : 'DRAFT',
+          date: new Date(latestOffer.created_at).toLocaleString(),
+          price: formatOfferPrice(latestOffer.offer_price),
+        }] : [],
+        lastFollowUp: 'N/A',
+        nextAction: latestOffer ? `Latest OA status: ${latestOffer.status}` : 'No OA created yet',
+        roleDescription: latestOffer ? 'Offer Synced' : 'Cloud Client',
+        company: contact.address || 'Unknown Address'
+      };
+    });
+
+    setCloudBuyers(mappedBuyers);
+    setLoadingCloudData(false);
+  };
+
   // Combine mocked pipeline with cloud-synced buyers
   const pipeline = (selectedPropertyId && MOCKED_PIPELINE[selectedPropertyId] ? [...MOCKED_PIPELINE[selectedPropertyId], ...cloudBuyers] : [...cloudBuyers]);
 
   useEffect(() => {
-    async function fetchCloudBuyers(agentId: string) {
-      setLoadingCloudData(true);
-      const { data, error } = await supabase
-        .from('crm_contacts')
-        .select('*')
-        .eq('agent_id', agentId)
-        .eq('type', 'BUYER');
-
-      if (!error && data) {
-        const mappedBuyers: Buyer[] = data.map((c: any) => ({
-          id: c.id,
-          name: c.name,
-          email: c.email,
-          phone: c.phone || '',
-          maxBudget: '$0 (Synced)', // Can be extended if field exists
-          financeStatus: 'UNAPPROVED',
-          status: (c.status as ProviderStatus) || 'PENDING',
-          conditions: [],
-          offerHistory: [],
-          lastFollowUp: 'N/A',
-          nextAction: 'Synced from CRM',
-          roleDescription: 'Cloud Client',
-          company: c.address || 'Unknown Address'
-        }));
-        setCloudBuyers(mappedBuyers);
-      }
-      setLoadingCloudData(false);
-    }
-
     async function fetchManagedProperties(agentId: string) {
       // 1. Fetch all sellers for this agent to get their property addresses
       const { data: sellers } = await supabase
@@ -382,7 +454,7 @@ export default function AgentWorkspacePage() {
         return;
       }
       setCurrentAgentId(session.user.id);
-      fetchCloudBuyers(session.user.id);
+      loadCloudBuyers(session.user.id, selectedPropertyId);
       fetchManagedProperties(session.user.id); // Fetch real properties here
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
       setUserRole(profile?.role || null);
@@ -395,7 +467,7 @@ export default function AgentWorkspacePage() {
       if (data) setLawyers(data);
     }
     fetchLawyers();
-  }, []);
+  }, [selectedPropertyId]);
 
   // --- 🌟 Fetch Real Activities for Transaction Timeline ---
   useEffect(() => {
@@ -596,7 +668,7 @@ export default function AgentWorkspacePage() {
         });
 
         // 3. Update CRM contact status if AI recommended one (SKIP FOR SELLERS & MOCK BUYERS)
-        const isCloudBuyer = activeFollowUpBuyer.roleDescription === 'Cloud Client';
+        const isCloudBuyer = activeFollowUpBuyer.roleDescription === 'Cloud Client' || activeFollowUpBuyer.roleDescription === 'Offer Synced';
         if (recommendedStatus && !isSeller && isCloudBuyer) {
            const { error: updateError } = await supabase
              .from('crm_contacts')
@@ -613,30 +685,7 @@ export default function AgentWorkspacePage() {
         
         // 5. Refresh cloud contacts to update the status badge on the dashboard
         if (currentAgentId && !isSeller) {
-          const { data: updatedData } = await supabase
-            .from('crm_contacts')
-            .select('*')
-            .eq('agent_id', currentAgentId)
-            .eq('type', 'BUYER');
-            
-          if (updatedData) {
-            const mapped: Buyer[] = updatedData.map((c: any) => ({
-              id: c.id,
-              name: c.name,
-              email: c.email,
-              phone: c.phone || '',
-              maxBudget: '$0 (Synced)',
-              financeStatus: 'UNAPPROVED',
-              status: c.status || 'PENDING',
-              conditions: [],
-              offerHistory: [],
-              lastFollowUp: 'N/A',
-              nextAction: 'Synced from CRM',
-              roleDescription: 'Cloud Client',
-              company: c.address || 'Unknown Address'
-            }));
-            setCloudBuyers(mapped);
-          }
+          await loadCloudBuyers(currentAgentId, selectedPropertyId);
         }
       }
     } catch (err) {
@@ -961,7 +1010,7 @@ export default function AgentWorkspacePage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-4 shrink-0">
-                      <MondayStatusBadge status={buyer.status} />
+                      <PipelineStatusBadge status={buyer.status} />
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isExpanded ? 'rotate-180 text-orange-600 bg-orange-100/50' : 'text-gray-300 bg-gray-50'}`}>
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" /></svg>
                       </div>

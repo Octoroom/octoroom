@@ -269,7 +269,14 @@ function ContractContent() {
       const response = await fetch('/api/signwell/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentId: docIdToVerify, propertyId, buyerId: userId, isSeller, offerTerms })
+        body: JSON.stringify({
+          documentId: docIdToVerify,
+          propertyId,
+          buyerId: userId,
+          agentId: searchParams?.get('agent_id') || null,
+          isSeller,
+          offerTerms
+        })
       });
       const data = await response.json();
       if (data.signed) {
