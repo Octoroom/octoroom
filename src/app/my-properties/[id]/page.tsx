@@ -24,6 +24,7 @@ export default function EditPropertyPage() {
   });
 
   const [propertyInfo, setPropertyInfo] = useState<any>(null);
+  const [isInWorkspace, setIsInWorkspace] = useState(false);
 
   useEffect(() => {
     fetchProperty();
@@ -60,6 +61,9 @@ export default function EditPropertyPage() {
 
       // 5. 数据赋值
       if (data) {
+        const workspaceRes = await fetch(`/api/workspace/properties?agentId=${user.id}`);
+        const workspaceData = await workspaceRes.json();
+        setIsInWorkspace(Array.isArray(workspaceData.propertyIds) ? workspaceData.propertyIds.includes(propertyId) : false);
         setPropertyInfo(data);
         setFormData({
           title: data.title || '',
@@ -110,6 +114,34 @@ export default function EditPropertyPage() {
       alert("更新失败: " + error.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleWorkspace = async (visible: boolean) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        alert("登录状态失效，请重新登录");
+        return;
+      }
+
+      const res = await fetch('/api/workspace/properties', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentId: user.id,
+          propertyId,
+          visible,
+          source: 'author_posted'
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Workspace update failed');
+
+      setIsInWorkspace(visible);
+    } catch (error: any) {
+      alert("Workspace 更新失败: " + error.message);
     }
   };
 
@@ -172,6 +204,18 @@ export default function EditPropertyPage() {
             <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
             修改房屋交易状态
           </label>
+          <div className="mb-4 flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-3">
+            <div>
+              <div className="text-[13px] font-black text-gray-900">Workspace</div>
+              <div className="text-[11px] text-gray-500 font-medium mt-1">Control whether this property appears in the agent workspace.</div>
+            </div>
+            <button
+              onClick={() => handleToggleWorkspace(!isInWorkspace)}
+              className={`px-4 py-2 rounded-full text-[12px] font-black transition-colors ${isInWorkspace ? 'bg-black text-white hover:bg-gray-800' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-100'}`}
+            >
+              {isInWorkspace ? 'Remove' : 'Add'}
+            </button>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <button 
               onClick={() => setFormData({...formData, status: 'active'})}

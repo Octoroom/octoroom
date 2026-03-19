@@ -235,6 +235,7 @@ export default function AgentWorkspacePage() {
   const [isAuthorizing, setIsAuthorizing] = useState(true);
   const [currentAgentId, setCurrentAgentId] = useState<string | null>(null);
   const [cloudBuyers, setCloudBuyers] = useState<Buyer[]>([]);
+  const [workspacePropertyIds, setWorkspacePropertyIds] = useState<string[]>([]);
   const [loadingCloudData, setLoadingCloudData] = useState(false);
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [loadingActivities, setLoadingActivities] = useState(false);
@@ -294,6 +295,132 @@ export default function AgentWorkspacePage() {
   });
 
   const currentProperty = managedProperties.find(p => p.id === selectedPropertyId) || managedProperties[0];
+  const loadWorkspacePropertyIds = async (agentId: string) => {
+    try {
+      const res = await fetch(`/api/workspace/properties?agentId=${agentId}`);
+      const data = await res.json();
+      setWorkspacePropertyIds(Array.isArray(data.propertyIds) ? data.propertyIds : []);
+      return Array.isArray(data.propertyIds) ? data.propertyIds : [];
+    } catch (error) {
+      console.error('Failed to load workspace property ids:', error);
+      setWorkspacePropertyIds([]);
+      return [];
+    }
+  };
+
+  const toggleWorkspaceProperty = async (propertyId: string, visible: boolean) => {
+    if (!currentAgentId) return;
+
+    try {
+      const res = await fetch('/api/workspace/properties', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentId: currentAgentId,
+          propertyId,
+          visible,
+          source: 'manual'
+        })
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Workspace update failed');
+      }
+
+      setWorkspacePropertyIds(prev => visible ? [...new Set([...prev, propertyId])] : prev.filter(id => id !== propertyId));
+
+      if (!visible && selectedPropertyId === propertyId) {
+        const remaining = managedProperties.filter(p => p.id !== propertyId);
+        setSelectedPropertyId(remaining[0]?.id || '');
+      }
+
+      if (currentAgentId) {
+        await fetchManagedPropertiesForAgent(currentAgentId);
+      }
+    } catch (error: any) {
+      alert(`更新 Workspace 失败: ${error.message}`);
+    }
+  };
+
+  const fetchManagedPropertiesForAgent = async (agentId: string) => {
+    const linkedPropertyIds = await loadWorkspacePropertyIds(agentId);
+    const idsToLoad = [...new Set(linkedPropertyIds)];
+
+    if (idsToLoad.length === 0) {
+      setManagedProperties([]);
+      return;
+    }
+
+    const { data: props, error } = await supabase
+      .from('octo_properties')
+      .select('*')
+      .in('id', idsToLoad);
+
+    if (error) {
+      console.error("Fetch workspace properties failed:", error);
+      return;
+    }
+
+    const { data: sellers } = await supabase
+      .from('crm_contacts')
+      .select('*')
+      .eq('agent_id', agentId)
+      .eq('type', 'SELLER');
+
+    const sellerEmails = sellers?.map((s: any) => s.email).filter(Boolean) || [];
+
+    let profiles: any[] = [];
+    if (sellerEmails.length > 0) {
+      const orFilter = sellerEmails.map((email: string) => `email.ilike.${email}`).join(',');
+      const { data: emailMatches } = await supabase
+        .from('profiles')
+        .select('id, email, username')
+        .or(orFilter);
+
+      profiles = [...(emailMatches || [])];
+    }
+
+    const mapped: ManagedProperty[] = (props || []).map((p: any) => {
+      const propAddr = (p.address_name || p.title || '').trim().toLowerCase();
+      const seller = sellers?.find((s: any) => {
+        const sellerAddr = (s.address || '').trim().toLowerCase();
+        return sellerAddr === propAddr && propAddr !== '';
+      });
+
+      let profile = profiles.find((pr: any) =>
+        pr.email?.toLowerCase() === seller?.email?.toLowerCase() && seller?.email
+      );
+
+      if (!profile && seller) {
+        profile = profiles.find((pr: any) =>
+          pr.username?.toLowerCase().includes(seller.name.toLowerCase()) ||
+          seller.name.toLowerCase().includes(pr.username?.toLowerCase() || '')
+        );
+      }
+
+      return {
+        id: p.id,
+        address: p.address_name || p.title,
+        vendor: seller ? seller.name : (p.author_name || '房东'),
+        sellerId: seller ? seller.id : undefined,
+        sellerEmail: seller ? seller.email : undefined,
+        sellerAvatar: seller ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${seller.name}` : undefined,
+        sellerProfileId: profile ? profile.id : undefined,
+        image: p.cover_image ? p.cover_image.split(',')[0] : 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80',
+        status: p.status === 'active' ? 'ACTIVE' : (p.status === 'sold' ? 'SOLD' : 'WITHDRAWN'),
+        activeBuyers: 0,
+        scheduledViewings: 0,
+        themeColor: '#0086c0'
+      };
+    });
+
+    setManagedProperties(mapped);
+    if (mapped.length > 0 && (!selectedPropertyId || !mapped.find(p => p.id === selectedPropertyId))) {
+      setSelectedPropertyId(mapped[0].id);
+    }
+  };
+
   const formatOfferPrice = (price: number | null | undefined) => {
     if (price === null || price === undefined || Number.isNaN(Number(price))) {
       return 'No Offer Yet';
@@ -437,131 +564,6 @@ export default function AgentWorkspacePage() {
     : (selectedPropertyId && MOCKED_PIPELINE[selectedPropertyId] ? [...MOCKED_PIPELINE[selectedPropertyId]] : []);
 
   useEffect(() => {
-    async function fetchManagedProperties(agentId: string) {
-      // 1. Fetch all sellers for this agent to get their property addresses
-      const { data: sellers } = await supabase
-        .from('crm_contacts')
-        .select('*')
-        .eq('agent_id', agentId)
-        .eq('type', 'SELLER');
-
-      const sellerAddresses = sellers?.map((s: any) => s.address).filter(Boolean) || [];
-
-      // 2. Fetch agent-posted workspace listings and CRM seller-linked listings separately.
-      const { data: authorProps, error: authorPropsError } = await supabase
-        .from('octo_properties')
-        .select('*')
-        .eq('author_id', agentId)
-        .eq('workspace_visible', true);
-
-      if (authorPropsError) {
-        console.error("Fetch author workspace properties failed:", authorPropsError);
-        return;
-      }
-
-      let sellerMatchedProps: any[] = [];
-      if (sellerAddresses.length > 0) {
-        const { data, error: sellerMatchedPropsError } = await supabase
-          .from('octo_properties')
-          .select('*')
-          .in('address_name', sellerAddresses);
-
-        if (sellerMatchedPropsError) {
-          console.error("Fetch seller-matched properties failed:", sellerMatchedPropsError);
-          return;
-        }
-
-        sellerMatchedProps = data || [];
-      }
-
-      const props = [...(authorProps || []), ...sellerMatchedProps].filter(
-        (prop, index, arr) => arr.findIndex((item) => item.id === prop.id) === index
-      );
-
-      if (props && props.length > 0) {
-        // --- 🔍 Fetch profiles for matched sellers using case-insensitive ilike ---
-        const sellerEmails = sellers?.map((s: any) => s.email).filter(Boolean) || [];
-        
-        let profiles: any[] = [];
-        if (sellerEmails.length > 0) {
-          // 🔍 Try to find by email (using ilike)
-          const orFilter = sellerEmails.map((email: string) => `email.ilike.${email}`).join(',');
-          const { data: emailMatches } = await supabase
-            .from('profiles')
-            .select('id, email, username')
-            .or(orFilter);
-            
-          profiles = [...(emailMatches || [])];
-          
-          // 🔍 FALLBACK: Try to find by the seller's names in the CRM (just in case they registered with a different email)
-          const sellerNames = sellers?.map((s: any) => s.name).filter(Boolean) || [];
-          if (sellerNames.length > 0) {
-            const nameFilter = sellerNames.map((name: string) => `username.ilike.%${name}%`).join(',');
-            const { data: nameMatches } = await supabase
-              .from('profiles')
-              .select('id, email, username')
-              .or(nameFilter);
-            
-            // Add unique name matches to profiles list
-            if (nameMatches) {
-              nameMatches.forEach((nm: any) => {
-                if (!profiles.find((p: any) => p.id === nm.id)) profiles.push(nm);
-              });
-            }
-          }
-        }
-
-        console.log('[DEBUG_WORKSPACE] All potentially matched profiles found:', profiles);
-
-        const mapped: ManagedProperty[] = props.map((p: any) => {
-          // Robust address matching (trimmed and case-insensitive)
-          const propAddr = (p.address_name || p.title || '').trim().toLowerCase();
-          const seller = sellers?.find((s: any) => {
-            const sellerAddr = (s.address || '').trim().toLowerCase();
-            return sellerAddr === propAddr && propAddr !== '';
-          });
-
-          // Robust mapping
-          let profile = profiles.find((pr: any) => 
-            pr.email?.toLowerCase() === seller?.email?.toLowerCase() && seller?.email
-          );
-          
-          // Fallback to username matching if email didn't hit
-          if (!profile && seller) {
-            profile = profiles.find((pr: any) => 
-              pr.username?.toLowerCase().includes(seller.name.toLowerCase()) ||
-              seller.name.toLowerCase().includes(pr.username?.toLowerCase() || '')
-            );
-          }
-
-          // 🔍 DEBUG: Log the result for the agent to check in console
-          if (seller) {
-            console.log(`[DEBUG_WORKSPACE] Property "${propAddr}" matched seller "${seller.name}" (${seller.email || 'no email'}). Profile linked: ${profile?.id ? `YES (username: ${profile.username})` : 'NO'}`);
-          }
-
-          return {
-            id: p.id,
-            address: p.address_name || p.title,
-            vendor: seller ? seller.name : (p.author_name || '房东'),
-            sellerId: seller ? seller.id : undefined,
-            sellerEmail: seller ? seller.email : undefined,
-            sellerAvatar: seller ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${seller.name}` : undefined,
-            sellerProfileId: profile ? profile.id : undefined,
-            image: p.cover_image ? p.cover_image.split(',')[0] : 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80',
-            status: p.status === 'active' ? 'ACTIVE' : (p.status === 'sold' ? 'SOLD' : 'WITHDRAWN'),
-            activeBuyers: 0, 
-            scheduledViewings: 0,
-            themeColor: '#0086c0'
-          };
-        });
-
-        setManagedProperties(mapped);
-        if (mapped.length > 0 && !selectedPropertyId) {
-          setSelectedPropertyId(mapped[0].id);
-        }
-      }
-    }
-
     async function checkAuth() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
@@ -570,7 +572,7 @@ export default function AgentWorkspacePage() {
       }
       setCurrentAgentId(session.user.id);
       loadCloudBuyers(session.user.id, selectedPropertyId);
-      fetchManagedProperties(session.user.id); // Fetch real properties here
+      fetchManagedPropertiesForAgent(session.user.id);
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
       setUserRole(profile?.role || null);
       setIsAuthorizing(false);
@@ -997,7 +999,7 @@ export default function AgentWorkspacePage() {
               <CategoryIcon id="PROPERTIES" className="w-3.5 h-3.5" />
             </div>
             <h2 className="text-[15px] font-black text-gray-900">当前维护房源</h2>
-            <span className="text-gray-400 text-xs ml-1 font-medium">1</span>
+            <span className="text-gray-400 text-xs ml-1 font-medium">{managedProperties.length}</span>
           </div>
 
           <div className="bg-white rounded-[20px] border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
@@ -1065,6 +1067,14 @@ export default function AgentWorkspacePage() {
                   <CategoryIcon id="STATS" className="w-3.5 h-3.5 text-black" />
                    <span className="text-[12px] font-black text-gray-700">{currentProperty?.activeBuyers || 0} 意向人</span>
                </div>
+              {currentProperty?.id && (
+                <button
+                  onClick={() => toggleWorkspaceProperty(currentProperty.id, false)}
+                  className="px-3 py-1.5 rounded-full border border-red-200 bg-red-50 text-red-600 text-[12px] font-black hover:bg-red-100 transition-colors shrink-0"
+                >
+                  Remove
+                </button>
+              )}
             </div>
           </div>
         </div>

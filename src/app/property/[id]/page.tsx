@@ -380,10 +380,13 @@ function PropertyContent() {
   const [property, setProperty] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserProfileRole, setCurrentUserProfileRole] = useState<string | null>(null);
+  const [isInWorkspace, setIsInWorkspace] = useState(false);
 
   // 🌟 动态判断当前用户是卖家还是买家
   const isSeller = property && currentUserId === property.author_id;
   const currentUserRole: Role = isSeller ? 'SELLER' : 'BUYER';
+  const isAgentUser = currentUserProfileRole?.toLowerCase() === 'agent' || currentUserProfileRole?.toLowerCase() === 'admin';
 
   // 🌟 根据 URL 参数动态设置默认 Tab
   const defaultTab = (searchParams?.get('tab') as 'DETAILS' | 'WORKFLOW' | 'PROVIDERS') || 'DETAILS';
@@ -400,6 +403,8 @@ function PropertyContent() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setCurrentUserId(user.id);
+        const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+        setCurrentUserProfileRole(profile?.role || null);
       }
     };
     getUser();
@@ -511,6 +516,10 @@ function PropertyContent() {
 
           const { data: saveData } = await supabase.from('octo_property_saves').select('id').eq('property_id', propertyId).eq('user_id', currentUserId).maybeSingle();
           if (saveData) setIsSaved(true);
+
+          const workspaceRes = await fetch(`/api/workspace/properties?agentId=${currentUserId}`);
+          const workspaceData = await workspaceRes.json();
+          setIsInWorkspace(Array.isArray(workspaceData.propertyIds) ? workspaceData.propertyIds.includes(propertyId) : false);
         }
       } catch (err: any) {
         setProperty(null);
@@ -521,6 +530,32 @@ function PropertyContent() {
 
     fetchProperty();
   }, [propertyId, currentUserId]); 
+
+  const handleToggleWorkspace = async (visible: boolean) => {
+    if (!currentUserId) {
+      alert('请先登录');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/workspace/properties', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentId: currentUserId,
+          propertyId,
+          visible,
+          source: isSeller ? 'author_posted' : 'invited_property'
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Workspace update failed');
+      setIsInWorkspace(visible);
+    } catch (error: any) {
+      alert('Workspace 更新失败: ' + error.message);
+    }
+  };
 
   // 服务商数据
   const [providers, setProviders] = useState<ServiceProvider[]>([]);
@@ -810,6 +845,14 @@ function PropertyContent() {
       
       {/* 🌟 底部悬浮行动条：买卖双方完全不同！ */}
       <div className="fixed bottom-0 left-0 md:left-auto md:w-[640px] w-full p-4 bg-white/90 backdrop-blur-md border-t border-gray-100 shadow-[0_-10px_30px_rgba(0,0,0,0.05)] z-40">
+        {activeTab === 'DETAILS' && isAgentUser && (
+          <button
+            onClick={() => handleToggleWorkspace(!isInWorkspace)}
+            className={`w-full mb-3 py-3 rounded-xl font-bold text-[14px] transition-colors flex justify-center items-center gap-2 ${isInWorkspace ? 'bg-black text-white shadow-lg shadow-gray-900/30 hover:bg-gray-800' : 'bg-blue-600 text-white shadow-lg shadow-blue-500/30 hover:bg-blue-700'}`}
+          >
+            {isInWorkspace ? 'Remove from Agent Workspace' : 'Add to Agent Workspace'}
+          </button>
+        )}
         {activeTab === 'DETAILS' && (
           currentUserRole === 'BUYER' ? (
             <button 

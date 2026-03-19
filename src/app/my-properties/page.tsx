@@ -126,6 +126,7 @@ export default function MyPropertiesPage() {
   
   const [properties, setProperties] = useState<any[]>([]);
   const [enquiries, setEnquiries] = useState<any[]>([]);
+  const [workspacePropertyIds, setWorkspacePropertyIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   // 状态管理
@@ -176,6 +177,10 @@ export default function MyPropertiesPage() {
       const fetchedProps = propertiesData || [];
       setProperties(fetchedProps);
 
+      const workspaceRes = await fetch(`/api/workspace/properties?agentId=${user.id}`);
+      const workspaceData = await workspaceRes.json();
+      setWorkspacePropertyIds(Array.isArray(workspaceData.propertyIds) ? workspaceData.propertyIds : []);
+
       const { data: enquiriesData } = await supabase.from('octo_property_enquiries').select('*, octo_properties(id, title, city_name, address_name, price_display, cover_image)').eq('host_id', user.id).order('created_at', { ascending: false });
       setEnquiries(enquiriesData || []);
 
@@ -206,6 +211,35 @@ export default function MyPropertiesPage() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  const handleToggleWorkspace = async (e: React.MouseEvent, propertyId: string, visible: boolean) => {
+    e.stopPropagation();
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        alert('请先登录');
+        return;
+      }
+
+      const res = await fetch('/api/workspace/properties', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentId: user.id,
+          propertyId,
+          visible,
+          source: 'author_posted'
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Workspace sync failed');
+
+      setWorkspacePropertyIds(prev => visible ? [...new Set([...prev, propertyId])] : prev.filter(id => id !== propertyId));
+    } catch (error: any) {
+      alert(`同步 Workspace 失败: ${error.message}`);
+    }
+  };
 
   // 🌟 新增：彻底删除房源的函数
   const handleDeleteProperty = async (e: React.MouseEvent, propertyId: string) => {
@@ -385,10 +419,21 @@ export default function MyPropertiesPage() {
         floor_area: formData.floorArea, land_area: formData.landArea,
         sale_method: formData.saleMethod, price_display: finalPriceDisplay, raw_price: formData.priceAmount,
         features: formData.features.join(','), description: formData.description,
-        cover_image: coverImageString, status: 'active', workspace_visible: true
+        cover_image: coverImageString, status: 'active'
       }]).select().single();
 
       if (insertError) throw insertError;
+
+      await fetch('/api/workspace/properties', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentId: user.id,
+          propertyId: newProperty.id,
+          visible: true,
+          source: 'author_posted'
+        })
+      });
 
       if (formData.syncToPost) {
         const postImage = finalImageUrls.length > 0 ? finalImageUrls[0] : `https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=500&q=80&random=${newProperty?.id}`;
@@ -511,6 +556,18 @@ export default function MyPropertiesPage() {
                           <svg fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                           </svg>
+                        </button>
+
+                        <button
+                          onClick={(e) => handleToggleWorkspace(e, prop.id, !workspacePropertyIds.includes(prop.id))}
+                          className={`min-w-[28px] h-7 px-2 backdrop-blur-md rounded-full flex items-center justify-center shadow-sm transition-all text-[10px] font-black ${
+                            workspacePropertyIds.includes(prop.id)
+                              ? 'bg-black/80 text-white hover:bg-black'
+                              : 'bg-white/70 text-gray-700 hover:bg-white'
+                          }`}
+                          title={workspacePropertyIds.includes(prop.id) ? '从 Workspace 移除' : '加入 Workspace'}
+                        >
+                          {workspacePropertyIds.includes(prop.id) ? 'IN' : 'ADD'}
                         </button>
 
                         {/* 收藏按钮 */}
