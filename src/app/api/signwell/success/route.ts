@@ -12,6 +12,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const propertyId = searchParams.get('property_id');
   const buyerId = searchParams.get('buyer_id');
+  const agentId = searchParams.get('agent_id');
   
   // SignWell 自动追加的文档 ID 参数
   const documentId = searchParams.get('document_id') || 'unknown'; 
@@ -63,7 +64,7 @@ export async function GET(request: Request) {
     
     if (prop) {
       await supabaseAdmin.from('notifications').insert({
-        receiver_id: prop.author_id,
+        receiver_id: agentId || prop.author_id,
         actor_id: buyerId,
         type: 'offer_signed_buyer',
         reference_id: propertyId,

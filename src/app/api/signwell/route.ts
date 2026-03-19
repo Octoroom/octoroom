@@ -10,7 +10,7 @@ const supabaseAdmin = createClient(
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { templateId, propertyId, buyerName, buyerEmail, buyerId, offerTerms, isAgentDrafting } = body;
+    const { templateId, propertyId, buyerName, buyerEmail, buyerId, agentId, offerTerms, isAgentDrafting } = body;
 
     if (!templateId || !propertyId || !buyerName || !buyerEmail || !buyerId) {
       return NextResponse.json({ error: "请求参数不完整，缺少买家或房源信息" }, { status: 400 });
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
     }
 
     // 构造跳转回我们隐形 API 的 URL (始终使用 Auth UUID)
-    const successRedirectUrl = `${origin}/api/signwell/success?property_id=${propertyId}&buyer_id=${resolvedBuyerId}`;
+    const successRedirectUrl = `${origin}/api/signwell/success?property_id=${propertyId}&buyer_id=${resolvedBuyerId}${agentId ? `&agent_id=${agentId}` : ''}`;
     const sellerSuccessUrl = `${origin}/api/signwell/seller-success?property_id=${propertyId}&buyer_id=${resolvedBuyerId}`;
 
     const payload = {
@@ -178,7 +178,7 @@ export async function POST(request: Request) {
       // 2. Create in-app notification for the buyer
       await supabaseAdmin.from('notifications').insert({
         receiver_id: resolvedBuyerId,
-        actor_id: property.author_id, // The agent (property author in this case)
+        actor_id: agentId || property.author_id,
         type: 'offer',
         reference_id: propertyId,
         metadata: { offer_id: newOffer.id }, // 🚀 CRITICAL: Link to the specific offer
