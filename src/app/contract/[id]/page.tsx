@@ -10,6 +10,10 @@ function ContractContent() {
   const searchParams = useSearchParams();
   const propertyId = params?.id as string;
   const urlOfferId = searchParams?.get('offerId') as string | null;
+  const queryBuyerId = searchParams?.get('buyer') || searchParams?.get('buyer_id');
+  const queryBuyerEmail = searchParams?.get('buyer_email');
+  const queryBuyerName = searchParams?.get('buyer_name');
+  const isAgentDraftingMode = !!(queryBuyerId || queryBuyerEmail || searchParams?.get('agent_id'));
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [loading, setLoading] = useState(true);
@@ -22,9 +26,9 @@ function ContractContent() {
   const [offerId, setOfferId] = useState<string | null>(null);
   const [offerStatus, setOfferStatus] = useState<string | null>(null);
   const [isSeller, setIsSeller] = useState<boolean>(false);
-  const [isAgentDrafting, setIsAgentDrafting] = useState<boolean>(false);
+  const [isAgentDrafting, setIsAgentDrafting] = useState<boolean>(isAgentDraftingMode);
   const [buyerEmail, setBuyerEmail] = useState<string>('');
-  const [targetBuyerId, setTargetBuyerId] = useState<string | null>(searchParams?.get('buyer') || null);
+  const [targetBuyerId, setTargetBuyerId] = useState<string | null>(queryBuyerId || null);
 
   // --- 📝 Offer Terms Form State (Mirrored from Prepare Page) ---
   const [purchaserName, setPurchaserName] = useState('');
@@ -78,6 +82,11 @@ function ContractContent() {
 
       if (urlOfferId) {
         offerQuery = offerQuery.eq('id', urlOfferId);
+      } else if (isAgentDraftingMode && queryBuyerId) {
+        offerQuery = offerQuery
+          .eq('buyer_id', queryBuyerId)
+          .order('created_at', { ascending: false })
+          .limit(1);
       } else {
         offerQuery = offerQuery
           .eq('buyer_id', user.id)
@@ -195,20 +204,30 @@ function ContractContent() {
 
       // --- 🕵️ Agent Drafting Mode Detection ---
       // If targetBuyerId is present, the property owner (agent) is drafting for a buyer.
-      if (targetBuyerId) {
+      if (isAgentDraftingMode) {
         setIsAgentDrafting(true);
-        // Fetch buyer details from CRM or Profile
-        const { data: contact } = await supabase.from('crm_contacts').select('name, email, phone, address').eq('id', targetBuyerId).single();
-        if (contact) {
-          setPurchaserName(contact.name || '');
-          setBuyerEmail(contact.email || '');
-          setContactNumber(contact.phone || '');
-          setBuyerAddress(contact.address || '');
-        } else {
-          // Fallback to profiles if not in CRM
-          const { data: profile } = await supabase.from('profiles').select('full_name, username').eq('id', targetBuyerId).single();
-          if (profile) {
-              setPurchaserName(profile.full_name || profile.username || '');
+        if (queryBuyerEmail) {
+          setBuyerEmail(queryBuyerEmail);
+        }
+        if (queryBuyerName) {
+          setPurchaserName(queryBuyerName);
+        }
+
+        // Fetch buyer details from CRM or Profile when we have an ID.
+        if (targetBuyerId) {
+          const { data: contact } = await supabase.from('crm_contacts').select('name, email, phone, address').eq('id', targetBuyerId).single();
+          if (contact) {
+            setPurchaserName(contact.name || queryBuyerName || '');
+            setBuyerEmail(contact.email || queryBuyerEmail || '');
+            setContactNumber(contact.phone || '');
+            setBuyerAddress(contact.address || '');
+          } else {
+            // Fallback to profiles if not in CRM
+            const { data: profile } = await supabase.from('profiles').select('full_name, username, email').eq('id', targetBuyerId).single();
+            if (profile) {
+              setPurchaserName(profile.full_name || profile.username || queryBuyerName || '');
+              setBuyerEmail(profile.email || queryBuyerEmail || '');
+            }
           }
         }
       } else if (!isSeller) {
@@ -238,7 +257,7 @@ function ContractContent() {
     return () => {
       if (channel) supabase.removeChannel(channel);
     };
-  }, [propertyId, router]);
+  }, [isAgentDraftingMode, propertyId, queryBuyerEmail, queryBuyerId, queryBuyerName, router, targetBuyerId, urlOfferId]);
 
   const handleVerifySignature = async (docIdToVerify: string) => {
     if (!userId) return;

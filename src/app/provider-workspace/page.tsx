@@ -654,9 +654,10 @@ export default function AgentWorkspacePage() {
     }
   };
 
-  const navigateToDraft = (email: string, name: string) => {
+  const navigateToDraft = (buyerId: string, email: string, name: string) => {
     const params = new URLSearchParams({
       property_id: selectedPropertyId,
+      buyer: buyerId,
       buyer_email: email,
       buyer_name: name,
       agent_id: currentAgentId || ''
@@ -971,7 +972,7 @@ export default function AgentWorkspacePage() {
                   <div className={`px-4 bg-gray-50/30 overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-[800px] py-6 border-t border-gray-100' : 'max-h-0'}`}>
                        <div className="flex gap-3 mb-8">
                           <button 
-                            onClick={(e) => { e.stopPropagation(); navigateToDraft(buyer.email, buyer.name); }}
+                            onClick={(e) => { e.stopPropagation(); navigateToDraft(buyer.id, buyer.email, buyer.name); }}
                             className="flex-1 bg-black text-white font-black py-3 rounded-2xl shadow-xl shadow-gray-200 flex items-center justify-center gap-2 hover:bg-gray-800 active:scale-95 transition-all text-[13px] tracking-tight"
                           >
                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>

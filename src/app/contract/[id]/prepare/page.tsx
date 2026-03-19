@@ -1,13 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 export default function PrepareOfferPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const propertyId = params?.id as string;
+  const draftBuyerId = searchParams?.get('buyer') || '';
+  const draftBuyerEmail = searchParams?.get('buyer_email') || '';
+  const draftBuyerName = searchParams?.get('buyer_name') || '';
+  const draftAgentId = searchParams?.get('agent_id') || '';
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -46,8 +51,10 @@ export default function PrepareOfferPage() {
         return;
       }
 
-      // Default purchaser name to the user's name
-      if (user.user_metadata?.full_name) {
+      // Agent drafting keeps the selected buyer identity; normal buyer flow defaults to self.
+      if (draftBuyerName) {
+        setPurchaserName(draftBuyerName);
+      } else if (user.user_metadata?.full_name) {
         setPurchaserName(user.user_metadata.full_name);
       } else if (user.email) {
         setPurchaserName(user.email.split('@')[0]);
@@ -90,7 +97,7 @@ export default function PrepareOfferPage() {
     };
 
     init();
-  }, [propertyId, router]);
+  }, [draftBuyerName, propertyId, router]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,8 +134,14 @@ export default function PrepareOfferPage() {
     // Store terms securely in sessionStorage for the next step to read
     sessionStorage.setItem(`offer_terms_${propertyId}`, JSON.stringify(offerTerms));
 
-    // Navigate to the central signing console
-    router.push(`/contract/${propertyId}`);
+    // Navigate to the central signing console and preserve agent-drafting context.
+    const nextParams = new URLSearchParams();
+    if (draftBuyerId) nextParams.set('buyer', draftBuyerId);
+    if (draftBuyerEmail) nextParams.set('buyer_email', draftBuyerEmail);
+    if (draftBuyerName) nextParams.set('buyer_name', draftBuyerName);
+    if (draftAgentId) nextParams.set('agent_id', draftAgentId);
+
+    router.push(`/contract/${propertyId}${nextParams.toString() ? `?${nextParams.toString()}` : ''}`);
   };
 
   if (loading) {
