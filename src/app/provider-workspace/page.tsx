@@ -945,14 +945,14 @@ export default function AgentWorkspacePage() {
     }
   };
 
-  const renderPropertyTimeline = () => (
+  const renderPropertyTimeline = (property: ManagedProperty) => (
     <div className="px-4 pb-5 pt-2 border-t border-gray-100 bg-gray-50/30">
       <div className="flex items-center justify-between pl-1 pr-1 mb-4">
         <div className="flex items-center gap-2">
           <History className="w-4 h-4 text-gray-400" />
           <div className="flex flex-col">
             <h4 className="text-[12px] font-black text-gray-400 uppercase tracking-widest">Property Timeline</h4>
-            <span className="text-[11px] font-bold text-gray-500 normal-case">{currentProperty?.address || 'No property selected'}</span>
+            <span className="text-[11px] font-bold text-gray-500 normal-case">{property.address || 'No property selected'}</span>
           </div>
         </div>
         <span className="text-[10px] font-bold text-gray-300 uppercase">Live Update</span>
@@ -1009,6 +1009,139 @@ export default function AgentWorkspacePage() {
       )}
     </div>
   );
+
+  const renderPropertyCard = (property: ManagedProperty, index: number) => {
+    const isSelected = selectedPropertyId === property.id;
+    const isExpanded = expandedPropertyId === property.id && activeView === 'summary';
+
+    return (
+      <div
+        key={property.id}
+        onClick={() => togglePropertyExpansion(property.id)}
+        className={`relative bg-white rounded-[20px] border shadow-sm overflow-hidden transition-all cursor-pointer ${
+          isSelected ? 'border-black/10 hover:shadow-md' : 'border-gray-100 hover:shadow-md hover:border-gray-200'
+        }`}
+        draggable
+        onDragStart={() => handlePropertyDragStart(index)}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={() => handlePropertyDrop(index)}
+        onDragEnd={() => setDraggedPropertyIndex(null)}
+      >
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleWorkspaceProperty(property.id, false);
+          }}
+          className="absolute right-3 top-3 z-10 w-8 h-8 rounded-full bg-white/95 border border-red-100 text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors flex items-center justify-center shadow-sm"
+          title="Remove from workspace"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+        <div className="flex items-center gap-4 p-4 pr-14">
+          <div className="flex flex-col gap-1 mr-1 items-center shrink-0">
+            <div className="text-gray-300 cursor-grab active:cursor-grabbing">
+              <GripVertical className="w-3.5 h-3.5" />
+            </div>
+            <button
+              disabled={index === 0}
+              onClick={(e) => {
+                e.stopPropagation();
+                moveProperty(index, 'UP');
+              }}
+              className={`p-0.5 rounded-md hover:bg-gray-200 transition-colors ${index === 0 ? 'opacity-10' : 'text-gray-400 opacity-60'}`}
+            >
+              <ArrowUp className="w-3 h-3" />
+            </button>
+            <button
+              disabled={index === managedProperties.length - 1}
+              onClick={(e) => {
+                e.stopPropagation();
+                moveProperty(index, 'DOWN');
+              }}
+              className={`p-0.5 rounded-md hover:bg-gray-200 transition-colors ${index === managedProperties.length - 1 ? 'opacity-10' : 'text-gray-400 opacity-60'}`}
+            >
+              <ArrowDown className="w-3 h-3" />
+            </button>
+          </div>
+          <div className={`w-1.5 h-12 rounded-full shrink-0 ${isSelected ? 'bg-black' : 'bg-gray-200'}`} />
+          <div className="w-16 h-16 rounded-xl bg-cover bg-center shrink-0 border border-gray-100 shadow-inner" style={{ backgroundImage: `url(${property.image || ''})` }} />
+          <div className="flex-1 min-w-0">
+            <h3 className="text-[16px] font-black text-gray-900 truncate tracking-tight">{property.address || 'Loading...'}</h3>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                {property.sellerAvatar && (
+                  <img
+                    src={property.sellerAvatar}
+                    alt={property.vendor}
+                    className="w-4 h-4 rounded-full border border-gray-100 shadow-sm"
+                  />
+                )}
+                <p className="text-[12px] font-bold text-gray-400 uppercase tracking-wider truncate">Owner: {property.vendor || '...'}</p>
+              </div>
+              {property.sellerEmail && isSelected && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveFollowUpBuyer({
+                        id: property.sellerId || '',
+                        name: property.vendor,
+                        email: property.sellerEmail || '',
+                        phone: '',
+                        infoBadge: '',
+                        financeStatus: 'UNAPPROVED',
+                        status: 'WORKING',
+                        conditions: [],
+                        offerHistory: [],
+                        lastFollowUp: '',
+                        nextAction: '',
+                        roleDescription: 'Seller'
+                      });
+                      setIsFollowUpModalOpen(true);
+                    }}
+                    className="p-1 hover:bg-gray-100 rounded-full transition-colors group"
+                    title="Record Seller Note"
+                  >
+                    <Mic className="w-3 h-3 text-gray-300 group-hover:text-blue-500" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (property.sellerProfileId) {
+                        router.push(`/messages?chatWith=${property.sellerProfileId}`);
+                      } else {
+                        alert(`This owner (${property.vendor}) has not registered an Octoroom account yet.\nVerified email: ${property.sellerEmail || 'N/A'}`);
+                      }
+                    }}
+                    className="p-1 hover:bg-gray-100 rounded-full transition-colors group"
+                    title={property.sellerProfileId ? "Send Message" : "Owner account unavailable"}
+                  >
+                    <MessageSquare className={`w-3 h-3 ${property.sellerProfileId ? 'text-blue-500 group-hover:text-blue-600' : 'text-gray-300 group-hover:text-gray-400'}`} />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-full border border-gray-100">
+              <CategoryIcon id="STATS" className="w-3.5 h-3.5 text-black" />
+              <span className="text-[12px] font-black text-gray-700">{property.activeBuyers || 0} {isSelected ? '意向人' : 'Intent'}</span>
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePropertyExpansion(property.id);
+              }}
+              className={`w-8 h-8 rounded-full flex items-center justify-center ${isSelected ? 'text-gray-500' : 'text-gray-300'} bg-gray-50`}
+            >
+              <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+            </button>
+          </div>
+        </div>
+        {isExpanded && renderPropertyTimeline(property)}
+      </div>
+    );
+  };
 
   const mapNotifToText = (type: string) => {
     switch (type) {
