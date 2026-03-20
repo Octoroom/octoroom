@@ -1130,7 +1130,7 @@ export default function AgentWorkspacePage() {
           </div>
         </div>
         {/* --- Featured Property Section --- */}
-        <div className="flex flex-col gap-3 max-h-[360px] overflow-y-auto pr-1">
+        <div className="flex flex-col gap-3 pr-1">
           <div className="flex items-center gap-2 mb-1 pl-1">
             <div className="w-[22px] h-[22px] rounded-[6px] bg-black flex items-center justify-center shadow-sm text-white">
               <CategoryIcon id="PROPERTIES" className="w-3.5 h-3.5" />
