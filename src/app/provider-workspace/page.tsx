@@ -856,6 +856,10 @@ export default function AgentWorkspacePage() {
       [newProperties[index], newProperties[index + 1]] = [newProperties[index + 1], newProperties[index]];
     }
     setManagedProperties(newProperties);
+    setSelectedPropertyId(newProperties[0]?.id || '');
+    if (expandedPropertyId) {
+      setExpandedPropertyId(newProperties.find((property) => property.id === expandedPropertyId)?.id || newProperties[0]?.id || null);
+    }
     persistPropertyOrder(newProperties);
   };
 
@@ -871,6 +875,10 @@ export default function AgentWorkspacePage() {
     newProperties.splice(index, 0, item);
 
     setManagedProperties(newProperties);
+    setSelectedPropertyId(newProperties[0]?.id || '');
+    if (expandedPropertyId) {
+      setExpandedPropertyId(newProperties.find((property) => property.id === expandedPropertyId)?.id || newProperties[0]?.id || null);
+    }
     persistPropertyOrder(newProperties);
     setDraggedPropertyIndex(null);
   };
