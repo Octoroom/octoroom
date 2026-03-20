@@ -326,7 +326,8 @@ export default function AgentWorkspacePage() {
     solicitor_id: ''
   });
 
-  const currentProperty = managedProperties.find(p => p.id === selectedPropertyId) || managedProperties[0];
+  const currentProperty = managedProperties[0];
+  const activeProperty = managedProperties.find(p => p.id === selectedPropertyId) || managedProperties[0];
   const togglePropertyExpansion = (propertyId: string) => {
     if (propertyId !== selectedPropertyId) {
       setActivities([]);
@@ -680,11 +681,11 @@ export default function AgentWorkspacePage() {
       // 🏘️ Fetch Property-Level activities (Seller context)
       setActivities([]);
       setLoadingActivities(true);
-      if (currentProperty) {
+      if (activeProperty) {
         fetchRealActivities({
-          id: currentProperty.sellerId || currentProperty.id,
-          name: currentProperty.vendor,
-          email: currentProperty.sellerEmail || '',
+          id: activeProperty.sellerId || activeProperty.id,
+          name: activeProperty.vendor,
+          email: activeProperty.sellerEmail || '',
           phone: '',
           infoBadge: '',
           financeStatus: 'UNAPPROVED',
@@ -699,7 +700,7 @@ export default function AgentWorkspacePage() {
         setLoadingActivities(false);
       }
     }
-  }, [expandedBuyerId, selectedPropertyId, currentAgentId, currentProperty]);
+  }, [expandedBuyerId, selectedPropertyId, currentAgentId, activeProperty]);
 
   // --- 🛰️ Real-time Subscriptions for Activities & Status ---
   useEffect(() => {
@@ -741,11 +742,11 @@ export default function AgentWorkspacePage() {
             });
             fetchRealActivities(buyer, true);
           }
-         } else if (currentProperty) {
+         } else if (activeProperty) {
             fetchRealActivities({
-              id: currentProperty.sellerId || currentProperty.id,
-              name: currentProperty.vendor,
-              email: currentProperty.sellerEmail || '',
+              id: activeProperty.sellerId || activeProperty.id,
+              name: activeProperty.vendor,
+              email: activeProperty.sellerEmail || '',
               phone: '',
               infoBadge: '',
               financeStatus: 'UNAPPROVED',
@@ -783,7 +784,7 @@ export default function AgentWorkspacePage() {
       supabase.removeChannel(contactChannel);
       supabase.removeChannel(activityChannel);
     };
-  }, [currentAgentId, selectedPropertyId, expandedBuyerId, currentProperty]);
+  }, [currentAgentId, selectedPropertyId, expandedBuyerId, activeProperty]);
 
   const fetchRealActivities = async (buyer: Buyer, forceRefresh: boolean = false) => {
     const cacheKey = getActivityCacheKey(buyer);
