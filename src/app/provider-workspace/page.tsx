@@ -846,10 +846,10 @@ export default function AgentWorkspacePage() {
         missingProperties.map(async (property) => {
           try {
             const mapped = await fetchActivityFeedData(buildSellerActivityTarget(property), property.id);
-            return [getPropertyActivityCacheKey(property.id), mapped] as const;
+            return [getPropertyActivityCacheKey(property.id), mapped] as [string, ActivityLog[]];
           } catch (error) {
             console.error('Preload property timeline failed:', error);
-            return [getPropertyActivityCacheKey(property.id), []] as const;
+            return [getPropertyActivityCacheKey(property.id), [] as ActivityLog[]] as [string, ActivityLog[]];
           }
         })
       );
