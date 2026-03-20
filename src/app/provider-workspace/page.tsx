@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Users, FileText, CheckCircle2, ChevronRight, Share2, Plus, MessageSquare, Phone, Building2, MapPin, Search, Calendar, History, Sparkles, AlertCircle, Camera, Check, Link, Upload, ExternalLink, RefreshCw, Send, Trash2, ArrowUp, ArrowDown, Mic, GripVertical, ChevronDown } from 'lucide-react';
+import { Users, FileText, CheckCircle2, ChevronRight, Share2, Plus, MessageSquare, Phone, Building2, MapPin, Search, Calendar, History, Sparkles, AlertCircle, Camera, Check, Link, Upload, ExternalLink, RefreshCw, Send, ArrowUp, ArrowDown, Mic, GripVertical, ChevronDown, MoreHorizontal } from 'lucide-react';
 import { FollowUpModal } from '@/components/workspace/FollowUpModal';
 import { supabase } from '@/lib/supabase';
 
@@ -244,6 +244,7 @@ export default function AgentWorkspacePage() {
   const [orderedPipeline, setOrderedPipeline] = useState<Buyer[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [draggedPropertyIndex, setDraggedPropertyIndex] = useState<number | null>(null);
+  const [openPropertyMenuId, setOpenPropertyMenuId] = useState<string | null>(null);
   const [isFollowUpModalOpen, setIsFollowUpModalOpen] = useState(false);
   const [activeFollowUpBuyer, setActiveFollowUpBuyer] = useState<Buyer | null>(null);
 
@@ -306,10 +307,12 @@ export default function AgentWorkspacePage() {
     }
   };
 
-  const getActivityCacheKey = (buyer: Buyer) => {
+  const getPropertyActivityCacheKey = (propertyId: string) => `property:${propertyId}`;
+
+  const getActivityCacheKey = (buyer: Buyer, propertyId: string = selectedPropertyId) => {
     return buyer.roleDescription === 'Seller'
-      ? `property:${selectedPropertyId}`
-      : `buyer:${selectedPropertyId}:${buyer.id}`;
+      ? getPropertyActivityCacheKey(propertyId)
+      : `buyer:${propertyId}:${buyer.id}`;
   };
 
   // --- 📝 Add Customer Modal State ---
@@ -326,16 +329,37 @@ export default function AgentWorkspacePage() {
     solicitor_id: ''
   });
 
-  const currentProperty = managedProperties[0];
   const activeProperty = managedProperties.find(p => p.id === selectedPropertyId) || managedProperties[0];
+  const buildSellerActivityTarget = (property: ManagedProperty): Buyer => ({
+    id: property.sellerId || property.id,
+    name: property.vendor,
+    email: property.sellerEmail || '',
+    phone: '',
+    infoBadge: '',
+    financeStatus: 'UNAPPROVED',
+    status: 'WORKING',
+    conditions: [],
+    offerHistory: [],
+    lastFollowUp: '',
+    nextAction: '',
+    roleDescription: 'Seller'
+  });
+
   const togglePropertyExpansion = (propertyId: string) => {
+    const propertyCacheKey = getPropertyActivityCacheKey(propertyId);
     if (propertyId !== selectedPropertyId) {
-      setActivities([]);
-      setLoadingActivities(true);
+      if (activityCache[propertyCacheKey]) {
+        setActivities(activityCache[propertyCacheKey]);
+        setLoadingActivities(false);
+      } else {
+        setActivities([]);
+        setLoadingActivities(true);
+      }
     }
     setSelectedPropertyId(propertyId);
     setExpandedBuyerId(null);
     setExpandedPropertyId((prev) => prev === propertyId ? null : propertyId);
+    setOpenPropertyMenuId(null);
   };
   const loadWorkspacePropertyIds = async (agentId: string) => {
     try {
@@ -682,20 +706,7 @@ export default function AgentWorkspacePage() {
       setActivities([]);
       setLoadingActivities(true);
       if (activeProperty) {
-        fetchRealActivities({
-          id: activeProperty.sellerId || activeProperty.id,
-          name: activeProperty.vendor,
-          email: activeProperty.sellerEmail || '',
-          phone: '',
-          infoBadge: '',
-          financeStatus: 'UNAPPROVED',
-          status: 'WORKING',
-          conditions: [],
-          offerHistory: [],
-          lastFollowUp: '',
-          nextAction: '',
-          roleDescription: 'Seller'
-        });
+        fetchRealActivities(buildSellerActivityTarget(activeProperty), false, activeProperty.id);
       } else {
         setLoadingActivities(false);
       }
@@ -743,20 +754,12 @@ export default function AgentWorkspacePage() {
             fetchRealActivities(buyer, true);
           }
          } else if (activeProperty) {
-            fetchRealActivities({
-              id: activeProperty.sellerId || activeProperty.id,
-              name: activeProperty.vendor,
-              email: activeProperty.sellerEmail || '',
-              phone: '',
-              infoBadge: '',
-              financeStatus: 'UNAPPROVED',
-              status: 'WORKING',
-              conditions: [],
-              offerHistory: [],
-              lastFollowUp: '',
-              nextAction: '',
-              roleDescription: 'Seller'
-            }, true);
+            setActivityCache(prev => {
+              const nc = { ...prev };
+              delete nc[getPropertyActivityCacheKey(activeProperty.id)];
+              return nc;
+            });
+            fetchRealActivities(buildSellerActivityTarget(activeProperty), true, activeProperty.id);
          }
       })
       .on('postgres_changes', { 
@@ -786,45 +789,88 @@ export default function AgentWorkspacePage() {
     };
   }, [currentAgentId, selectedPropertyId, expandedBuyerId, activeProperty]);
 
-  const fetchRealActivities = async (buyer: Buyer, forceRefresh: boolean = false) => {
-    const cacheKey = getActivityCacheKey(buyer);
-    // 💡 Instant Cache Check
+  const fetchActivityFeedData = async (buyer: Buyer, propertyId: string) => {
+    const query = buyer.roleDescription === 'Seller'
+      ? `/api/workspace/activities?propertyId=${propertyId}&viewerId=${currentAgentId || ''}`
+      : `/api/workspace/activities?propertyId=${propertyId}&buyerEmail=${buyer.email}&buyerId=${buyer.id}&viewerId=${currentAgentId || ''}`;
+    const res = await fetch(query);
+    const data = await res.json();
+
+    if (!data.activities || !Array.isArray(data.activities)) {
+      return [] as ActivityLog[];
+    }
+
+    return data.activities.map((n: any) => ({
+      id: n.id,
+      type: (n.type === 'offer' || n.type.startsWith('offer_')) ? 'OFFER' : 'NOTE',
+      content: n.content || mapNotifToText(n.type),
+      timestamp: new Date(n.created_at).toLocaleString(),
+      agentName: n.source === 'crm_note' ? 'Agent Follow-up' : (n.buyer_name || 'System Update'),
+      avatarUrl: n.avatar_url,
+      buyerName: n.buyer_name,
+      amountLabel: n.amount_label
+    })) as ActivityLog[];
+  };
+
+  const fetchRealActivities = async (buyer: Buyer, forceRefresh: boolean = false, propertyIdOverride?: string) => {
+    const resolvedPropertyId = propertyIdOverride || selectedPropertyId;
+    const cacheKey = getActivityCacheKey(buyer, resolvedPropertyId);
     if (!forceRefresh && activityCache[cacheKey]) {
       setActivities(activityCache[cacheKey]);
+      setLoadingActivities(false);
       return;
     }
 
     setLoadingActivities(true);
     try {
-      const query = buyer.roleDescription === 'Seller'
-        ? `/api/workspace/activities?propertyId=${selectedPropertyId}&viewerId=${currentAgentId || ''}`
-        : `/api/workspace/activities?propertyId=${selectedPropertyId}&buyerEmail=${buyer.email}&buyerId=${buyer.id}&viewerId=${currentAgentId || ''}`;
-      const res = await fetch(query);
-      const data = await res.json();
-
-      if (data.activities && Array.isArray(data.activities)) {
-        const mapped: ActivityLog[] = data.activities.map((n: any) => ({
-          id: n.id,
-          type: (n.type === 'offer' || n.type.startsWith('offer_')) ? 'OFFER' : 'NOTE',
-          content: n.content || mapNotifToText(n.type),
-          timestamp: new Date(n.created_at).toLocaleString(),
-          agentName: n.source === 'crm_note' ? '代理跟进' : (n.buyer_name || '系统推送'),
-          avatarUrl: n.avatar_url,
-          buyerName: n.buyer_name,
-          amountLabel: n.amount_label
-        }));
-        setActivities(mapped);
-        // 🚀 Update Cache
-        setActivityCache(prev => ({ ...prev, [cacheKey]: mapped }));
-      } else {
-        setActivities([]);
-      }
+      const mapped = await fetchActivityFeedData(buyer, resolvedPropertyId);
+      setActivities(mapped);
+      setActivityCache(prev => ({ ...prev, [cacheKey]: mapped }));
     } catch (err) {
       console.error("Fetch activities failed:", err);
       setActivities([]);
     }
     setLoadingActivities(false);
   };
+
+  useEffect(() => {
+    if (!currentAgentId || managedProperties.length === 0) return;
+
+    const missingProperties = managedProperties.filter((property) => !activityCache[getPropertyActivityCacheKey(property.id)]);
+    if (missingProperties.length === 0) return;
+
+    let cancelled = false;
+
+    const preloadPropertyActivities = async () => {
+      const cacheEntries = await Promise.all(
+        missingProperties.map(async (property) => {
+          try {
+            const mapped = await fetchActivityFeedData(buildSellerActivityTarget(property), property.id);
+            return [getPropertyActivityCacheKey(property.id), mapped] as const;
+          } catch (error) {
+            console.error('Preload property timeline failed:', error);
+            return [getPropertyActivityCacheKey(property.id), []] as const;
+          }
+        })
+      );
+
+      if (cancelled) return;
+
+      setActivityCache((prev) => {
+        const nextCache = { ...prev };
+        cacheEntries.forEach(([cacheKey, mapped]) => {
+          nextCache[cacheKey] = mapped;
+        });
+        return nextCache;
+      });
+    };
+
+    preloadPropertyActivities();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentAgentId, managedProperties, activityCache]);
 
   const moveBuyer = (index: number, direction: 'UP' | 'DOWN') => {
     const newPipeline = [...orderedPipeline];
@@ -954,70 +1000,77 @@ export default function AgentWorkspacePage() {
     }
   };
 
-  const renderPropertyTimeline = (property: ManagedProperty) => (
-    <div className="px-4 pb-5 pt-2 border-t border-gray-100 bg-gray-50/30">
-      <div className="flex items-center justify-between pl-1 pr-1 mb-4">
-        <div className="flex items-center gap-2">
-          <History className="w-4 h-4 text-gray-400" />
-          <div className="flex flex-col">
-            <h4 className="text-[12px] font-black text-gray-400 uppercase tracking-widest">Property Timeline</h4>
-            <span className="text-[11px] font-bold text-gray-500 normal-case">{property.address || 'No property selected'}</span>
-          </div>
-        </div>
-        <span className="text-[10px] font-bold text-gray-300 uppercase">Live Update</span>
-      </div>
+  const renderPropertyTimeline = (property: ManagedProperty) => {
+    const propertyCacheKey = getPropertyActivityCacheKey(property.id);
+    const cachedActivities = activityCache[propertyCacheKey];
+    const timelineActivities = selectedPropertyId === property.id ? activities : (cachedActivities || []);
+    const isTimelineLoading = selectedPropertyId === property.id ? loadingActivities && !cachedActivities : false;
 
-      {loadingActivities ? (
-        <div className="py-10 flex flex-col items-center justify-center gap-3 bg-gray-50/50 rounded-[24px] border border-gray-100">
-          <div className="w-6 h-6 border-2 border-gray-200 border-t-black rounded-full animate-spin"></div>
-          <span className="text-[11px] font-bold text-gray-400">正在同步房源流水...</span>
-        </div>
-      ) : activities.length > 0 ? (
-        <div className="space-y-4 relative before:absolute before:left-[19px] before:top-4 before:bottom-4 before:w-[2px] before:bg-gray-100/60">
-          {activities.map((log, idx) => (
-            <div key={log.id} className="relative pl-12 group">
-              <div className={`absolute left-0 top-1.5 w-[40px] h-[40px] rounded-full border-4 border-gray-50 flex items-center justify-center z-10 overflow-hidden transition-transform group-hover:scale-110 ${idx === 0 ? 'bg-black text-white shadow-xl shadow-gray-200' : 'bg-white text-gray-400 border-gray-100'}`}>
-                {log.avatarUrl ? (
-                  <img src={log.avatarUrl} alt={log.buyerName || log.agentName} className="w-full h-full object-cover" />
-                ) : idx === 0 ? (
-                  <Sparkles className="w-4 h-4" />
-                ) : (
-                  <div className="w-2 h-2 rounded-full bg-gray-200" />
-                )}
-              </div>
-              <div className="p-5 bg-white rounded-[24px] border border-gray-100 shadow-sm transition-all hover:border-gray-200 hover:shadow-md">
-                <div className="flex justify-between items-center mb-2">
-                  <span className={`text-[10px] font-black uppercase tracking-wider ${idx === 0 ? 'text-black' : 'text-gray-400'}`}>
-                    {idx === 0 ? '房源新动态' : '历史轨迹'}
-                  </span>
-                  <span className="text-[10px] font-bold text-gray-300">{log.timestamp}</span>
-                </div>
-                <p className="text-[14px] font-bold text-gray-800 leading-relaxed">{log.content}</p>
-                {(log.buyerName || log.amountLabel) && (
-                  <div className="mt-2 flex items-center gap-2 text-[11px] font-bold text-gray-500">
-                    {log.buyerName && <span>{log.buyerName}</span>}
-                    {log.amountLabel && <span className="px-2 py-0.5 rounded-full bg-gray-50 border border-gray-100 text-gray-700">{log.amountLabel}</span>}
-                  </div>
-                )}
-                <div className="mt-2 flex items-center gap-1.5 opacity-40">
-                  <div className="w-3 h-3 rounded-full bg-gray-200" />
-                  <span className="text-[10px] font-black text-gray-500 uppercase tracking-tight">{log.agentName}</span>
-                </div>
-              </div>
+    return (
+      <div className="px-4 pb-5 pt-2 border-t border-gray-100 bg-gray-50/30">
+        <div className="flex items-center justify-between pl-1 pr-1 mb-4">
+          <div className="flex items-center gap-2">
+            <History className="w-4 h-4 text-gray-400" />
+            <div className="flex flex-col">
+              <h4 className="text-[12px] font-black text-gray-400 uppercase tracking-widest">Property Timeline</h4>
+              <span className="text-[11px] font-bold text-gray-500 normal-case">{property.address || 'No property selected'}</span>
             </div>
-          ))}
-        </div>
-      ) : (
-        <div className="py-12 text-center bg-gray-50/50 rounded-[24px] border-2 border-dashed border-gray-200/50">
-          <div className="w-10 h-10 bg-white rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm">
-            <History className="w-5 h-5 text-gray-200" />
           </div>
-          <p className="text-[13px] font-black text-gray-400">暂无房源动态或业主沟通记录</p>
-          <p className="text-[10px] font-bold text-gray-300 mt-1 uppercase">No activity tracked yet</p>
+          <span className="text-[10px] font-bold text-gray-300 uppercase">Live Update</span>
         </div>
-      )}
-    </div>
-  );
+
+        {isTimelineLoading ? (
+          <div className="py-10 flex flex-col items-center justify-center gap-3 bg-gray-50/50 rounded-[24px] border border-gray-100">
+            <div className="w-6 h-6 border-2 border-gray-200 border-t-black rounded-full animate-spin"></div>
+            <span className="text-[11px] font-bold text-gray-400">Loading property timeline...</span>
+          </div>
+        ) : timelineActivities.length > 0 ? (
+          <div className="space-y-4 relative before:absolute before:left-[19px] before:top-4 before:bottom-4 before:w-[2px] before:bg-gray-100/60">
+            {timelineActivities.map((log, idx) => (
+              <div key={log.id} className="relative pl-12 group">
+                <div className={`absolute left-0 top-1.5 w-[40px] h-[40px] rounded-full border-4 border-gray-50 flex items-center justify-center z-10 overflow-hidden transition-transform group-hover:scale-110 ${idx === 0 ? 'bg-black text-white shadow-xl shadow-gray-200' : 'bg-white text-gray-400 border-gray-100'}`}>
+                  {log.avatarUrl ? (
+                    <img src={log.avatarUrl} alt={log.buyerName || log.agentName} className="w-full h-full object-cover" />
+                  ) : idx === 0 ? (
+                    <Sparkles className="w-4 h-4" />
+                  ) : (
+                    <div className="w-2 h-2 rounded-full bg-gray-200" />
+                  )}
+                </div>
+                <div className="p-5 bg-white rounded-[24px] border border-gray-100 shadow-sm transition-all hover:border-gray-200 hover:shadow-md">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className={`text-[10px] font-black uppercase tracking-wider ${idx === 0 ? 'text-black' : 'text-gray-400'}`}>
+                      {idx === 0 ? 'Latest Update' : 'History'}
+                    </span>
+                    <span className="text-[10px] font-bold text-gray-300">{log.timestamp}</span>
+                  </div>
+                  <p className="text-[14px] font-bold text-gray-800 leading-relaxed">{log.content}</p>
+                  {(log.buyerName || log.amountLabel) && (
+                    <div className="mt-2 flex items-center gap-2 text-[11px] font-bold text-gray-500">
+                      {log.buyerName && <span>{log.buyerName}</span>}
+                      {log.amountLabel && <span className="px-2 py-0.5 rounded-full bg-gray-50 border border-gray-100 text-gray-700">{log.amountLabel}</span>}
+                    </div>
+                  )}
+                  <div className="mt-2 flex items-center gap-1.5 opacity-40">
+                    <div className="w-3 h-3 rounded-full bg-gray-200" />
+                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-tight">{log.agentName}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="py-12 text-center bg-gray-50/50 rounded-[24px] border-2 border-dashed border-gray-200/50">
+            <div className="w-10 h-10 bg-white rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm">
+              <History className="w-5 h-5 text-gray-200" />
+            </div>
+            <p className="text-[13px] font-black text-gray-400">No property activity yet</p>
+            <p className="text-[10px] font-bold text-gray-300 mt-1 uppercase">No activity tracked yet</p>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderPropertyCard = (property: ManagedProperty, index: number) => {
     const isSelected = selectedPropertyId === property.id;
@@ -1026,7 +1079,10 @@ export default function AgentWorkspacePage() {
     return (
       <div
         key={property.id}
-        onClick={() => togglePropertyExpansion(property.id)}
+        onClick={() => {
+          setOpenPropertyMenuId(null);
+          togglePropertyExpansion(property.id);
+        }}
         className={`relative bg-white rounded-[20px] border shadow-sm overflow-hidden transition-all cursor-pointer ${
           isSelected ? 'border-black/10 hover:shadow-md' : 'border-gray-100 hover:shadow-md hover:border-gray-200'
         }`}
@@ -1036,16 +1092,34 @@ export default function AgentWorkspacePage() {
         onDrop={() => handlePropertyDrop(index)}
         onDragEnd={() => setDraggedPropertyIndex(null)}
       >
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleWorkspaceProperty(property.id, false);
-          }}
-          className="absolute right-3 top-3 z-10 w-8 h-8 rounded-full bg-white/95 border border-red-100 text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors flex items-center justify-center shadow-sm"
-          title="Remove from workspace"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
+        <div className="absolute right-3 top-3 z-20">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpenPropertyMenuId((prev) => prev === property.id ? null : property.id);
+            }}
+            className="w-8 h-8 rounded-full bg-white/95 border border-gray-100 text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors flex items-center justify-center shadow-sm"
+            title="More options"
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </button>
+
+          {openPropertyMenuId === property.id && (
+            <div className="absolute right-0 mt-2 min-w-[176px] rounded-2xl border border-gray-100 bg-white p-2 shadow-xl shadow-gray-200/70">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpenPropertyMenuId(null);
+                  toggleWorkspaceProperty(property.id, false);
+                }}
+                className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[13px] font-bold text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+              >
+                <span>Remove from workspace</span>
+                <span className="text-[10px] font-black uppercase tracking-wide opacity-60">Off</span>
+              </button>
+            </div>
+          )}
+        </div>
         <div className="flex items-center gap-4 p-4 pr-14">
           <div className="flex flex-col gap-1 mr-1 items-center shrink-0">
             <div className="text-gray-300 cursor-grab active:cursor-grabbing">
@@ -1294,236 +1368,7 @@ export default function AgentWorkspacePage() {
             <span className="text-gray-400 text-xs ml-1 font-medium">{managedProperties.length}</span>
           </div>
 
-          <div
-            className="relative bg-white rounded-[20px] border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow"
-            onClick={() => {
-              if (currentProperty?.id) {
-                togglePropertyExpansion(currentProperty.id);
-              }
-            }}
-            draggable
-            onDragStart={() => {
-              const currentIndex = managedProperties.findIndex((property) => property.id === currentProperty?.id);
-              handlePropertyDragStart(currentIndex);
-            }}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={() => {
-              const currentIndex = managedProperties.findIndex((property) => property.id === currentProperty?.id);
-              handlePropertyDrop(currentIndex);
-            }}
-            onDragEnd={() => setDraggedPropertyIndex(null)}
-          >
-            {currentProperty?.id && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleWorkspaceProperty(currentProperty.id, false);
-                }}
-                className="absolute right-3 top-3 z-10 w-8 h-8 rounded-full bg-white/95 border border-red-100 text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors flex items-center justify-center shadow-sm"
-                title="Remove from workspace"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            )}
-            <div className="flex items-center gap-4 p-4 pr-14">
-               <div className="flex flex-col gap-1 mr-1 items-center shrink-0">
-                 <div className="text-gray-300 cursor-grab active:cursor-grabbing">
-                   <GripVertical className="w-3.5 h-3.5" />
-                 </div>
-                 <button
-                   disabled={managedProperties.findIndex((property) => property.id === currentProperty?.id) === 0}
-                   onClick={(e) => {
-                     e.stopPropagation();
-                     const currentIndex = managedProperties.findIndex((property) => property.id === currentProperty?.id);
-                     moveProperty(currentIndex, 'UP');
-                   }}
-                   className={`p-0.5 rounded-md hover:bg-gray-200 transition-colors ${managedProperties.findIndex((property) => property.id === currentProperty?.id) === 0 ? 'opacity-10' : 'text-gray-400 opacity-60'}`}
-                 >
-                   <ArrowUp className="w-3 h-3" />
-                 </button>
-                 <button
-                   disabled={managedProperties.findIndex((property) => property.id === currentProperty?.id) === managedProperties.length - 1}
-                   onClick={(e) => {
-                     e.stopPropagation();
-                     const currentIndex = managedProperties.findIndex((property) => property.id === currentProperty?.id);
-                     moveProperty(currentIndex, 'DOWN');
-                   }}
-                   className={`p-0.5 rounded-md hover:bg-gray-200 transition-colors ${managedProperties.findIndex((property) => property.id === currentProperty?.id) === managedProperties.length - 1 ? 'opacity-10' : 'text-gray-400 opacity-60'}`}
-                 >
-                   <ArrowDown className="w-3 h-3" />
-                 </button>
-               </div>
-               <div className="w-1.5 h-12 rounded-full shrink-0 bg-black" />
-               <div className="w-16 h-16 rounded-xl bg-cover bg-center shrink-0 border border-gray-100 shadow-inner" style={{ backgroundImage: `url(${currentProperty?.image || ''})` }} />
-               <div className="flex-1 truncate">
-                   <h3 className="text-[16px] font-black text-gray-900 truncate tracking-tight">{currentProperty?.address || '加载中...'}</h3>
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1.5">
-                        {currentProperty?.sellerAvatar && (
-                          <img 
-                            src={currentProperty.sellerAvatar} 
-                            alt={currentProperty.vendor} 
-                            className="w-4 h-4 rounded-full border border-gray-100 shadow-sm"
-                          />
-                        )}
-                        <p className="text-[12px] font-bold text-gray-400 uppercase tracking-wider">业主: {currentProperty?.vendor || '...'}</p>
-                      </div>
-                      {currentProperty?.sellerEmail && (
-                        <div className="flex items-center gap-1">
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveFollowUpBuyer({
-                                id: currentProperty.sellerId || '',
-                                name: currentProperty.vendor,
-                                email: currentProperty.sellerEmail || '',
-          phone: '',
-          infoBadge: '',
-                                financeStatus: 'UNAPPROVED',
-                                status: 'WORKING',
-                                conditions: [],
-                                offerHistory: [],
-                                lastFollowUp: '',
-                                nextAction: '',
-                                roleDescription: 'Seller'
-                              });
-                              setIsFollowUpModalOpen(true);
-                            }}
-                            className="p-1 hover:bg-gray-100 rounded-full transition-colors group"
-                            title="记录业主跟进 (Record Seller Note)"
-                          >
-                            <Mic className="w-3 h-3 text-gray-300 group-hover:text-blue-500" />
-                          </button>
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (currentProperty.sellerProfileId) {
-                                router.push(`/messages?chatWith=${currentProperty.sellerProfileId}`);
-                              } else {
-                                alert(`该房东 (${currentProperty.vendor}) 尚未注册 Octoroom 账户，暂时无法站内私信。\n(验证邮箱: ${currentProperty.sellerEmail || '无'})`);
-                              }
-                            }}
-                            className="p-1 hover:bg-gray-100 rounded-full transition-colors group"
-                            title={currentProperty.sellerProfileId ? "发送私信 (Send Message)" : "房东未注册账户"}
-                          >
-                            <MessageSquare className={`w-3 h-3 ${currentProperty.sellerProfileId ? 'text-blue-500 group-hover:text-blue-600' : 'text-gray-300 group-hover:text-gray-400'}`} />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-               </div>
-               <div className="flex items-center gap-2 shrink-0">
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-full border border-gray-100">
-                    <CategoryIcon id="STATS" className="w-3.5 h-3.5 text-black" />
-                    <span className="text-[12px] font-black text-gray-700">{currentProperty?.activeBuyers || 0} 意向人</span>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (currentProperty?.id) togglePropertyExpansion(currentProperty.id);
-                    }}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-gray-500 bg-gray-50"
-                  >
-                    <ChevronDown className={`w-4 h-4 transition-transform ${expandedPropertyId === currentProperty?.id && activeView === 'summary' ? 'rotate-180' : ''}`} />
-                  </button>
-               </div>
-            </div>
-            {activeView === 'summary' && currentProperty?.id && expandedPropertyId === currentProperty.id && renderPropertyTimeline(currentProperty)}
-          </div>
-
-          {managedProperties.filter(property => property.id !== currentProperty?.id).map((property) => (
-            <div
-              key={property.id}
-              onClick={() => {
-                togglePropertyExpansion(property.id);
-              }}
-              className="relative bg-white rounded-[20px] border border-gray-100 shadow-sm overflow-hidden hover:shadow-md hover:border-gray-200 transition-all cursor-pointer"
-              draggable
-              onDragStart={() => {
-                const currentIndex = managedProperties.findIndex((item) => item.id === property.id);
-                handlePropertyDragStart(currentIndex);
-              }}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => {
-                const currentIndex = managedProperties.findIndex((item) => item.id === property.id);
-                handlePropertyDrop(currentIndex);
-              }}
-              onDragEnd={() => setDraggedPropertyIndex(null)}
-            >
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleWorkspaceProperty(property.id, false);
-                }}
-                className="absolute right-3 top-3 z-10 w-8 h-8 rounded-full bg-white/95 border border-red-100 text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors flex items-center justify-center shadow-sm"
-                title="Remove from workspace"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-              <div className="flex items-center gap-4 p-4 pr-14">
-                <div className="flex flex-col gap-1 mr-1 items-center shrink-0">
-                  <div className="text-gray-300 cursor-grab active:cursor-grabbing">
-                    <GripVertical className="w-3.5 h-3.5" />
-                  </div>
-                  <button
-                    disabled={managedProperties.findIndex((item) => item.id === property.id) === 0}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const currentIndex = managedProperties.findIndex((item) => item.id === property.id);
-                      moveProperty(currentIndex, 'UP');
-                    }}
-                    className={`p-0.5 rounded-md hover:bg-gray-200 transition-colors ${managedProperties.findIndex((item) => item.id === property.id) === 0 ? 'opacity-10' : 'text-gray-400 opacity-60'}`}
-                  >
-                    <ArrowUp className="w-3 h-3" />
-                  </button>
-                  <button
-                    disabled={managedProperties.findIndex((item) => item.id === property.id) === managedProperties.length - 1}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const currentIndex = managedProperties.findIndex((item) => item.id === property.id);
-                      moveProperty(currentIndex, 'DOWN');
-                    }}
-                    className={`p-0.5 rounded-md hover:bg-gray-200 transition-colors ${managedProperties.findIndex((item) => item.id === property.id) === managedProperties.length - 1 ? 'opacity-10' : 'text-gray-400 opacity-60'}`}
-                  >
-                    <ArrowDown className="w-3 h-3" />
-                  </button>
-                </div>
-                <div className="w-1.5 h-12 rounded-full shrink-0 bg-gray-200" />
-                <div className="w-16 h-16 rounded-xl bg-cover bg-center shrink-0 border border-gray-100 shadow-inner" style={{ backgroundImage: `url(${property.image || ''})` }} />
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-[16px] font-black text-gray-900 truncate tracking-tight">{property.address || 'Loading...'}</h3>
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      {property.sellerAvatar && (
-                        <img
-                          src={property.sellerAvatar}
-                          alt={property.vendor}
-                          className="w-4 h-4 rounded-full border border-gray-100 shadow-sm"
-                        />
-                      )}
-                      <p className="text-[12px] font-bold text-gray-400 uppercase tracking-wider truncate">Owner: {property.vendor || '...'}</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-full border border-gray-100">
-                    <CategoryIcon id="STATS" className="w-3.5 h-3.5 text-black" />
-                    <span className="text-[12px] font-black text-gray-700">{property.activeBuyers || 0} Intent</span>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      togglePropertyExpansion(property.id);
-                    }}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-gray-300 bg-gray-50"
-                  >
-                    <ChevronDown className={`w-4 h-4 transition-transform ${expandedPropertyId === property.id && activeView === 'summary' ? 'rotate-180 text-gray-500' : ''}`} />
-                  </button>
-                </div>
-              </div>
-              {activeView === 'summary' && expandedPropertyId === property.id && renderPropertyTimeline(property)}
-            </div>
-          ))}
+          {managedProperties.map((property, index) => renderPropertyCard(property, index))}
         </div>
 
         
