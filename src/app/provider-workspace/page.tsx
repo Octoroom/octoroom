@@ -1427,7 +1427,7 @@ export default function AgentWorkspacePage() {
                   </button>
                </div>
             </div>
-            {activeView === 'summary' && currentProperty?.id && expandedPropertyId === currentProperty.id && renderPropertyTimeline()}
+            {activeView === 'summary' && currentProperty?.id && expandedPropertyId === currentProperty.id && renderPropertyTimeline(currentProperty)}
           </div>
 
           {managedProperties.filter(property => property.id !== currentProperty?.id).map((property) => (
@@ -1520,7 +1520,7 @@ export default function AgentWorkspacePage() {
                   </button>
                 </div>
               </div>
-              {activeView === 'summary' && expandedPropertyId === property.id && renderPropertyTimeline()}
+              {activeView === 'summary' && expandedPropertyId === property.id && renderPropertyTimeline(property)}
             </div>
           ))}
         </div>
