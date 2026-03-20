@@ -230,6 +230,7 @@ export default function AgentWorkspacePage() {
   const [activeView, setActiveView] = useState<WorkspaceView>('summary');
   const [managedProperties, setManagedProperties] = useState<ManagedProperty[]>([]);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string>('');
+  const [expandedPropertyId, setExpandedPropertyId] = useState<string | null>(null);
   const [expandedBuyerId, setExpandedBuyerId] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [isAuthorizing, setIsAuthorizing] = useState(true);
@@ -326,6 +327,11 @@ export default function AgentWorkspacePage() {
   });
 
   const currentProperty = managedProperties.find(p => p.id === selectedPropertyId) || managedProperties[0];
+  const togglePropertyExpansion = (propertyId: string) => {
+    setSelectedPropertyId(propertyId);
+    setExpandedBuyerId(null);
+    setExpandedPropertyId((prev) => prev === propertyId ? null : propertyId);
+  };
   const loadWorkspacePropertyIds = async (agentId: string) => {
     try {
       const res = await fetch(`/api/workspace/properties?agentId=${agentId}`);
@@ -364,6 +370,10 @@ export default function AgentWorkspacePage() {
       if (!visible && selectedPropertyId === propertyId) {
         const remaining = managedProperties.filter(p => p.id !== propertyId);
         setSelectedPropertyId(remaining[0]?.id || '');
+        setExpandedPropertyId(remaining[0]?.id || null);
+      } else if (!visible && expandedPropertyId === propertyId) {
+        const remaining = managedProperties.filter(p => p.id !== propertyId);
+        setExpandedPropertyId(remaining[0]?.id || null);
       }
 
       if (currentAgentId) {
@@ -450,6 +460,9 @@ export default function AgentWorkspacePage() {
     setManagedProperties(orderedMapped);
     if (orderedMapped.length > 0 && (!selectedPropertyId || !orderedMapped.find(p => p.id === selectedPropertyId))) {
       setSelectedPropertyId(orderedMapped[0].id);
+    }
+    if (orderedMapped.length > 0 && !expandedPropertyId && !selectedPropertyId) {
+      setExpandedPropertyId(orderedMapped[0].id);
     }
   };
 
@@ -1143,8 +1156,7 @@ export default function AgentWorkspacePage() {
             className="relative bg-white rounded-[20px] border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow"
             onClick={() => {
               if (currentProperty?.id) {
-                setSelectedPropertyId(currentProperty.id);
-                setExpandedBuyerId(null);
+                togglePropertyExpansion(currentProperty.id);
               }
             }}
             draggable
@@ -1263,20 +1275,25 @@ export default function AgentWorkspacePage() {
                     <CategoryIcon id="STATS" className="w-3.5 h-3.5 text-black" />
                     <span className="text-[12px] font-black text-gray-700">{currentProperty?.activeBuyers || 0} 意向人</span>
                   </div>
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-gray-500 bg-gray-50">
-                    <ChevronDown className="w-4 h-4 rotate-180" />
-                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (currentProperty?.id) togglePropertyExpansion(currentProperty.id);
+                    }}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-gray-500 bg-gray-50"
+                  >
+                    <ChevronDown className={`w-4 h-4 transition-transform ${expandedPropertyId === currentProperty?.id && activeView === 'summary' ? 'rotate-180' : ''}`} />
+                  </button>
                </div>
             </div>
-            {activeView === 'summary' && currentProperty?.id && renderPropertyTimeline()}
+            {activeView === 'summary' && currentProperty?.id && expandedPropertyId === currentProperty.id && renderPropertyTimeline()}
           </div>
 
           {managedProperties.filter(property => property.id !== currentProperty?.id).map((property) => (
             <div
               key={property.id}
               onClick={() => {
-                setSelectedPropertyId(property.id);
-                setExpandedBuyerId(null);
+                togglePropertyExpansion(property.id);
               }}
               className="relative bg-white rounded-[20px] border border-gray-100 shadow-sm overflow-hidden hover:shadow-md hover:border-gray-200 transition-all cursor-pointer"
               draggable
@@ -1351,12 +1368,18 @@ export default function AgentWorkspacePage() {
                     <CategoryIcon id="STATS" className="w-3.5 h-3.5 text-black" />
                     <span className="text-[12px] font-black text-gray-700">{property.activeBuyers || 0} Intent</span>
                   </div>
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-gray-300 bg-gray-50">
-                    <ChevronDown className={`w-4 h-4 transition-transform ${selectedPropertyId === property.id && activeView === 'summary' ? 'rotate-180 text-gray-500' : ''}`} />
-                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      togglePropertyExpansion(property.id);
+                    }}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-gray-300 bg-gray-50"
+                  >
+                    <ChevronDown className={`w-4 h-4 transition-transform ${expandedPropertyId === property.id && activeView === 'summary' ? 'rotate-180 text-gray-500' : ''}`} />
+                  </button>
                 </div>
               </div>
-              {activeView === 'summary' && selectedPropertyId === property.id && renderPropertyTimeline()}
+              {activeView === 'summary' && expandedPropertyId === property.id && renderPropertyTimeline()}
             </div>
           ))}
         </div>
