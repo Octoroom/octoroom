@@ -328,6 +328,10 @@ export default function AgentWorkspacePage() {
 
   const currentProperty = managedProperties.find(p => p.id === selectedPropertyId) || managedProperties[0];
   const togglePropertyExpansion = (propertyId: string) => {
+    if (propertyId !== selectedPropertyId) {
+      setActivities([]);
+      setLoadingActivities(true);
+    }
     setSelectedPropertyId(propertyId);
     setExpandedBuyerId(null);
     setExpandedPropertyId((prev) => prev === propertyId ? null : propertyId);
@@ -674,11 +678,13 @@ export default function AgentWorkspacePage() {
       }
     } else {
       // 🏘️ Fetch Property-Level activities (Seller context)
-      if (currentProperty && currentProperty.sellerEmail) {
+      setActivities([]);
+      setLoadingActivities(true);
+      if (currentProperty) {
         fetchRealActivities({
-          id: currentProperty.sellerId || '',
+          id: currentProperty.sellerId || currentProperty.id,
           name: currentProperty.vendor,
-          email: currentProperty.sellerEmail,
+          email: currentProperty.sellerEmail || '',
           phone: '',
           infoBadge: '',
           financeStatus: 'UNAPPROVED',
@@ -689,6 +695,8 @@ export default function AgentWorkspacePage() {
           nextAction: '',
           roleDescription: 'Seller'
         });
+      } else {
+        setLoadingActivities(false);
       }
     }
   }, [expandedBuyerId, selectedPropertyId, currentAgentId, currentProperty]);
@@ -762,7 +770,7 @@ export default function AgentWorkspacePage() {
           if (buyer) {
             setActivityCache(prev => {
               const nc = { ...prev };
-              delete nc[buyer.id];
+              delete nc[getActivityCacheKey(buyer)];
               return nc;
             });
             fetchRealActivities(buyer, true);
