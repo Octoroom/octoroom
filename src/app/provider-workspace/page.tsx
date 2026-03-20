@@ -244,7 +244,10 @@ export default function AgentWorkspacePage() {
   const [orderedPipeline, setOrderedPipeline] = useState<Buyer[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [draggedPropertyIndex, setDraggedPropertyIndex] = useState<number | null>(null);
+  const [draggedPropertyId, setDraggedPropertyId] = useState<string | null>(null);
   const [openPropertyMenuId, setOpenPropertyMenuId] = useState<string | null>(null);
+  const [buyerPropertyAssignments, setBuyerPropertyAssignments] = useState<Record<string, string[]>>({});
+  const [buyerActivePropertyIds, setBuyerActivePropertyIds] = useState<Record<string, string>>({});
   const [isFollowUpModalOpen, setIsFollowUpModalOpen] = useState(false);
   const [activeFollowUpBuyer, setActiveFollowUpBuyer] = useState<Buyer | null>(null);
 
@@ -330,6 +333,29 @@ export default function AgentWorkspacePage() {
   });
 
   const activeProperty = managedProperties.find(p => p.id === selectedPropertyId) || managedProperties[0];
+  const getBuyerContextPropertyId = (buyerId: string) => {
+    const activeBuyerPropertyId = buyerActivePropertyIds[buyerId];
+    if (activeBuyerPropertyId) return activeBuyerPropertyId;
+
+    const linkedPropertyIds = buyerPropertyAssignments[buyerId];
+    if (linkedPropertyIds && linkedPropertyIds.length > 0) {
+      return linkedPropertyIds[linkedPropertyIds.length - 1];
+    }
+
+    if (managedProperties.length === 1) {
+      return managedProperties[0]?.id || '';
+    }
+
+    return '';
+  };
+
+  const getBuyerLinkedProperties = (buyerId: string) => {
+    const linkedIds = buyerPropertyAssignments[buyerId] || [];
+    return linkedIds
+      .map((propertyId) => managedProperties.find((property) => property.id === propertyId))
+      .filter((property): property is ManagedProperty => Boolean(property));
+  };
+
   const buildSellerActivityTarget = (property: ManagedProperty): Buyer => ({
     id: property.sellerId || property.id,
     name: property.vendor,
@@ -344,6 +370,39 @@ export default function AgentWorkspacePage() {
     nextAction: '',
     roleDescription: 'Seller'
   });
+
+  const assignPropertyToBuyer = (buyerId: string, propertyId: string) => {
+    setBuyerPropertyAssignments((prev) => {
+      const existingIds = prev[buyerId] || [];
+      if (existingIds.includes(propertyId)) return prev;
+      return { ...prev, [buyerId]: [...existingIds, propertyId] };
+    });
+    setBuyerActivePropertyIds((prev) => ({ ...prev, [buyerId]: propertyId }));
+  };
+
+  const removePropertyFromBuyer = (buyerId: string, propertyId: string) => {
+    const remainingIds = (buyerPropertyAssignments[buyerId] || []).filter((id) => id !== propertyId);
+
+    setBuyerPropertyAssignments((prev) => {
+      const existingIds = prev[buyerId] || [];
+      const nextIds = existingIds.filter((id) => id !== propertyId);
+      if (nextIds.length === existingIds.length) return prev;
+      if (nextIds.length === 0) {
+        const { [buyerId]: _removed, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [buyerId]: nextIds };
+    });
+
+    setBuyerActivePropertyIds((prev) => {
+      if (prev[buyerId] !== propertyId) return prev;
+      if (remainingIds.length === 0) {
+        const { [buyerId]: _removed, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [buyerId]: remainingIds[remainingIds.length - 1] };
+    });
+  };
 
   const togglePropertyExpansion = (propertyId: string) => {
     const propertyCacheKey = getPropertyActivityCacheKey(propertyId);
@@ -636,6 +695,33 @@ export default function AgentWorkspacePage() {
   const pipeline = cloudBuyers.length > 0
     ? [...cloudBuyers]
     : (selectedPropertyId && MOCKED_PIPELINE[selectedPropertyId] ? [...MOCKED_PIPELINE[selectedPropertyId]] : []);
+  const activeTimelinePropertyId = expandedBuyerId ? getBuyerContextPropertyId(expandedBuyerId) : selectedPropertyId;
+
+  useEffect(() => {
+    if (!currentAgentId) return;
+
+    try {
+      const savedAssignments = localStorage.getItem(`octoroom_buyer_property_assignments_${currentAgentId}`);
+      const savedActivePropertyIds = localStorage.getItem(`octoroom_buyer_active_property_ids_${currentAgentId}`);
+
+      setBuyerPropertyAssignments(savedAssignments ? JSON.parse(savedAssignments) : {});
+      setBuyerActivePropertyIds(savedActivePropertyIds ? JSON.parse(savedActivePropertyIds) : {});
+    } catch (error) {
+      console.warn('Failed to restore buyer property links:', error);
+      setBuyerPropertyAssignments({});
+      setBuyerActivePropertyIds({});
+    }
+  }, [currentAgentId]);
+
+  useEffect(() => {
+    if (!currentAgentId) return;
+    localStorage.setItem(`octoroom_buyer_property_assignments_${currentAgentId}`, JSON.stringify(buyerPropertyAssignments));
+  }, [currentAgentId, buyerPropertyAssignments]);
+
+  useEffect(() => {
+    if (!currentAgentId) return;
+    localStorage.setItem(`octoroom_buyer_active_property_ids_${currentAgentId}`, JSON.stringify(buyerActivePropertyIds));
+  }, [currentAgentId, buyerActivePropertyIds]);
 
   useEffect(() => {
     async function checkAuth() {
@@ -698,8 +784,12 @@ export default function AgentWorkspacePage() {
 
     if (expandedBuyerId) {
       const selectedBuyer = pipeline.find(b => b.id === expandedBuyerId);
-      if (selectedBuyer) {
-        fetchRealActivities(selectedBuyer);
+      const buyerPropertyId = getBuyerContextPropertyId(expandedBuyerId);
+      if (selectedBuyer && buyerPropertyId) {
+        fetchRealActivities(selectedBuyer, false, buyerPropertyId);
+      } else {
+        setActivities([]);
+        setLoadingActivities(false);
       }
     } else {
       // 🏘️ Fetch Property-Level activities (Seller context)
@@ -711,11 +801,12 @@ export default function AgentWorkspacePage() {
         setLoadingActivities(false);
       }
     }
-  }, [expandedBuyerId, selectedPropertyId, currentAgentId, activeProperty]);
+  }, [expandedBuyerId, selectedPropertyId, currentAgentId, activeProperty, buyerActivePropertyIds, buyerPropertyAssignments]);
 
   // --- 🛰️ Real-time Subscriptions for Activities & Status ---
   useEffect(() => {
     if (!currentAgentId) return;
+    if (expandedBuyerId && !activeTimelinePropertyId) return;
 
     // 1. Listen for CRM Contact Updates (for status bar real-time sync)
     const contactChannel = supabase
@@ -739,7 +830,7 @@ export default function AgentWorkspacePage() {
         event: 'INSERT', 
         schema: 'public', 
         table: 'notifications',
-        filter: `reference_id=eq.${selectedPropertyId}`
+        filter: `reference_id=eq.${activeTimelinePropertyId}`
       }, () => {
         console.log('[REALTIME] New Notification - Refreshing Activities');
         // Clear appropriate cache and refresh
@@ -766,7 +857,7 @@ export default function AgentWorkspacePage() {
         event: 'INSERT', 
         schema: 'public', 
         table: 'crm_notes',
-        filter: `property_id=eq.${selectedPropertyId}`
+        filter: `property_id=eq.${activeTimelinePropertyId}`
       }, () => {
         console.log('[REALTIME] New CRM Note - Refreshing Activities');
         if (expandedBuyerId) {
@@ -787,7 +878,7 @@ export default function AgentWorkspacePage() {
       supabase.removeChannel(contactChannel);
       supabase.removeChannel(activityChannel);
     };
-  }, [currentAgentId, selectedPropertyId, expandedBuyerId, activeProperty]);
+  }, [currentAgentId, selectedPropertyId, expandedBuyerId, activeProperty, activeTimelinePropertyId, buyerActivePropertyIds, buyerPropertyAssignments]);
 
   const fetchActivityFeedData = async (buyer: Buyer, propertyId: string) => {
     const query = buyer.roleDescription === 'Seller'
@@ -916,6 +1007,7 @@ export default function AgentWorkspacePage() {
 
   const handlePropertyDragStart = (index: number) => {
     setDraggedPropertyIndex(index);
+    setDraggedPropertyId(managedProperties[index]?.id || null);
   };
 
   const handlePropertyDrop = (index: number) => {
@@ -928,11 +1020,24 @@ export default function AgentWorkspacePage() {
     setManagedProperties(newProperties);
     persistPropertyOrder(newProperties);
     setDraggedPropertyIndex(null);
+    setDraggedPropertyId(null);
+  };
+
+  const handleBuyerPropertyDrop = (buyerId: string) => {
+    if (!draggedPropertyId) return;
+    assignPropertyToBuyer(buyerId, draggedPropertyId);
+    setDraggedPropertyIndex(null);
+    setDraggedPropertyId(null);
   };
 
   const handleSaveFollowUp = async (summary: string, transcript: string, recommendedStatus?: string) => {
     if (!activeFollowUpBuyer) return;
     const isSeller = activeFollowUpBuyer.roleDescription === 'Seller';
+    const followUpPropertyId = isSeller ? selectedPropertyId : getBuyerContextPropertyId(activeFollowUpBuyer.id);
+    if (!followUpPropertyId) {
+      alert('Please link a property to this buyer before saving follow-up notes.');
+      return;
+    }
     
     try {
       // 1. Post to activities API (handles notes/summaries)
@@ -940,7 +1045,7 @@ export default function AgentWorkspacePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          propertyId: selectedPropertyId,
+          propertyId: followUpPropertyId,
           buyerId: activeFollowUpBuyer.id,
           buyerEmail: activeFollowUpBuyer.email,
           agentId: currentAgentId,
@@ -988,11 +1093,11 @@ export default function AgentWorkspacePage() {
         }
 
         // 4. Refresh data for this contact (force refresh)
-        fetchRealActivities(activeFollowUpBuyer, true);
+        fetchRealActivities(activeFollowUpBuyer, true, followUpPropertyId);
         
         // 5. Refresh cloud contacts to update the status badge on the dashboard
         if (currentAgentId && !isSeller) {
-          await loadCloudBuyers(currentAgentId, selectedPropertyId);
+          await loadCloudBuyers(currentAgentId, followUpPropertyId);
         }
       }
     } catch (err) {
@@ -1090,7 +1195,10 @@ export default function AgentWorkspacePage() {
         onDragStart={() => handlePropertyDragStart(index)}
         onDragOver={(e) => e.preventDefault()}
         onDrop={() => handlePropertyDrop(index)}
-        onDragEnd={() => setDraggedPropertyIndex(null)}
+        onDragEnd={() => {
+          setDraggedPropertyIndex(null);
+          setDraggedPropertyId(null);
+        }}
       >
         <div className="absolute right-3 top-3 z-20">
           <button
@@ -1236,15 +1344,15 @@ export default function AgentWorkspacePage() {
     }
   };
 
-  const navigateToDraft = (buyerId: string, email: string, name: string) => {
+  const navigateToDraft = (propertyId: string, buyerId: string, email: string, name: string) => {
     const params = new URLSearchParams({
-      property_id: selectedPropertyId,
+      property_id: propertyId,
       buyer: buyerId,
       buyer_email: email,
       buyer_name: name,
       agent_id: currentAgentId || ''
     });
-    router.push(`/contract/${selectedPropertyId}/prepare?${params.toString()}`);
+    router.push(`/contract/${propertyId}/prepare?${params.toString()}`);
   };
 
   const handleAddCustomerSubmit = async (e: React.FormEvent) => {
@@ -1398,6 +1506,9 @@ export default function AgentWorkspacePage() {
           <div className="bg-white rounded-[24px] border border-gray-100 shadow-sm overflow-hidden">
             {orderedPipeline.map((buyer, index) => {
               const isExpanded = expandedBuyerId === buyer.id;
+              const linkedProperties = getBuyerLinkedProperties(buyer.id);
+              const activeBuyerPropertyId = getBuyerContextPropertyId(buyer.id);
+              const activeBuyerProperty = managedProperties.find((property) => property.id === activeBuyerPropertyId);
               
               return (
                 <div 
@@ -1461,14 +1572,94 @@ export default function AgentWorkspacePage() {
                   </div>
 
                   {/* --- Inline Expanded Content with Interactive Timeline --- */}
-                  <div className={`px-4 bg-gray-50/30 overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-[800px] py-6 border-t border-gray-100' : 'max-h-0'}`}>
+                  <div
+                    className={`px-4 bg-gray-50/30 overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-[1200px] py-6 border-t border-gray-100' : 'max-h-0'}`}
+                    onDragOver={(e) => {
+                      if (!draggedPropertyId) return;
+                      e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleBuyerPropertyDrop(buyer.id);
+                    }}
+                  >
+                       <div className={`mb-5 rounded-[22px] border-2 border-dashed p-4 transition-all ${draggedPropertyId ? 'border-blue-300 bg-blue-50/70' : 'border-gray-200 bg-white/70'}`}>
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-gray-400">Linked Properties</p>
+                              <p className="mt-1 text-[12px] font-bold text-gray-500">
+                                {linkedProperties.length > 0 ? 'Drag more properties here or tap one below to switch offer context.' : 'Drag a property card from the top section into this buyer.'}
+                              </p>
+                            </div>
+                            <span className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-gray-500 shadow-sm border border-gray-100">
+                              {linkedProperties.length} linked
+                            </span>
+                          </div>
+
+                          <div className="mt-4 flex flex-col gap-2">
+                            {linkedProperties.length > 0 ? linkedProperties.map((property) => {
+                              const isActiveLinkedProperty = property.id === activeBuyerPropertyId;
+                              return (
+                                <div
+                                  key={`${buyer.id}-${property.id}`}
+                                  className={`flex items-center gap-3 rounded-2xl border px-3 py-3 transition-all ${isActiveLinkedProperty ? 'border-black bg-black text-white shadow-lg shadow-gray-200' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+                                >
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setBuyerActivePropertyIds((prev) => ({ ...prev, [buyer.id]: property.id }));
+                                    }}
+                                    className="flex flex-1 items-center gap-3 text-left"
+                                  >
+                                    <div className="h-10 w-10 rounded-xl bg-cover bg-center border border-white/20 shadow-sm shrink-0" style={{ backgroundImage: `url(${property.image || ''})` }} />
+                                    <div className="min-w-0">
+                                      <p className={`truncate text-[13px] font-black ${isActiveLinkedProperty ? 'text-white' : 'text-gray-900'}`}>{property.address}</p>
+                                      <p className={`truncate text-[11px] font-bold uppercase tracking-wide ${isActiveLinkedProperty ? 'text-white/70' : 'text-gray-400'}`}>Owner: {property.vendor}</p>
+                                    </div>
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      navigateToDraft(property.id, buyer.id, buyer.email, buyer.name);
+                                    }}
+                                    className={`rounded-xl px-3 py-2 text-[11px] font-black transition-colors ${isActiveLinkedProperty ? 'bg-white text-black hover:bg-gray-100' : 'bg-black text-white hover:bg-gray-800'}`}
+                                  >
+                                    Offer
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      removePropertyFromBuyer(buyer.id, property.id);
+                                    }}
+                                    className={`rounded-xl px-2 py-2 text-[11px] font-black transition-colors ${isActiveLinkedProperty ? 'text-white/80 hover:bg-white/10' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
+                                    title="Remove property from this buyer"
+                                  >
+                                    x
+                                  </button>
+                                </div>
+                              );
+                            }) : (
+                              <div className="rounded-2xl bg-white px-4 py-5 text-center border border-gray-100">
+                                <p className="text-[12px] font-black text-gray-400">No property linked yet</p>
+                                <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-gray-300">Drop property here</p>
+                              </div>
+                            )}
+                          </div>
+                       </div>
+
                        <div className="flex gap-3 mb-8">
                           <button 
-                            onClick={(e) => { e.stopPropagation(); navigateToDraft(buyer.id, buyer.email, buyer.name); }}
-                            className="flex-1 bg-black text-white font-black py-3 rounded-2xl shadow-xl shadow-gray-200 flex items-center justify-center gap-2 hover:bg-gray-800 active:scale-95 transition-all text-[13px] tracking-tight"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!activeBuyerProperty) return;
+                              navigateToDraft(activeBuyerProperty.id, buyer.id, buyer.email, buyer.name);
+                            }}
+                            disabled={!activeBuyerProperty}
+                            className={`flex-1 font-black py-3 rounded-2xl shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all text-[13px] tracking-tight ${activeBuyerProperty ? 'bg-black text-white shadow-gray-200 hover:bg-gray-800' : 'bg-gray-200 text-gray-400 shadow-transparent cursor-not-allowed'}`}
                           >
                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                             生成出价 (Create Offer)
+                             {activeBuyerProperty ? `Create Offer - ${activeBuyerProperty.address}` : 'Link A Property First'}
                           </button>
                            <button 
                              onClick={(e) => {
@@ -1479,20 +1670,23 @@ export default function AgentWorkspacePage() {
                              className="flex-1 bg-white text-black border-2 border-gray-100 font-black py-3 rounded-2xl hover:bg-gray-50 active:scale-95 transition-all shadow-sm text-[13px] tracking-tight flex items-center justify-center gap-2"
                            >
                               <Mic className="w-4 h-4 text-gray-400" />
-                              记录跟进 note
+                              Record Follow-up Note
                            </button>
                        </div>
 
                        <div className="space-y-4">
                           <div className="flex items-center justify-between pl-1 pr-1">
-                            <h4 className="text-[11px] font-black text-gray-400 uppercase tracking-widest">交易动态实时线 (Timeline)</h4>
+                            <div className="flex flex-col">
+                              <h4 className="text-[11px] font-black text-gray-400 uppercase tracking-widest">Buyer Timeline</h4>
+                              <span className="text-[11px] font-bold text-gray-500">{activeBuyerProperty?.address || 'Please link one property to this buyer'}</span>
+                            </div>
                             <span className="text-[10px] font-bold text-gray-300 uppercase">Live Update</span>
                           </div>
                           
                           {loadingActivities ? (
                             <div className="py-8 flex flex-col items-center justify-center gap-3">
                                <div className="w-6 h-6 border-2 border-gray-200 border-t-black rounded-full animate-spin"></div>
-                               <span className="text-[11px] font-bold text-gray-400">正在同步交易流水...</span>
+                               <span className="text-[11px] font-bold text-gray-400">Loading buyer timeline...</span>
                             </div>
                           ) : activities.length > 0 ? (
                             <div className="space-y-3 relative before:absolute before:left-[15px] before:top-2 before:bottom-2 before:w-[2px] before:bg-gray-100">
@@ -1508,7 +1702,7 @@ export default function AgentWorkspacePage() {
                                     <div className="p-4 bg-white rounded-[18px] border border-gray-100 shadow-sm transition-all hover:border-gray-200">
                                        <div className="flex justify-between items-center mb-1.5">
                                           <span className={`text-[10px] font-black uppercase tracking-wider ${idx === 0 ? 'text-orange-600' : 'text-gray-400'}`}>
-                                            {idx === 0 ? '最新动态' : '历史轨迹'}
+                                            {idx === 0 ? 'Latest Update' : 'History'}
                                           </span>
                                           <span className="text-[10px] font-bold text-gray-300">{log.timestamp}</span>
                                        </div>
@@ -1522,7 +1716,7 @@ export default function AgentWorkspacePage() {
                                <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm">
                                   <svg className="w-5 h-5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0116 0z" /></svg>
                                </div>
-                               <p className="text-[12px] font-black text-gray-400">暂无该笔交易的相关流水记录</p>
+                               <p className="text-[12px] font-black text-gray-400">{activeBuyerProperty ? 'No activity tracked for this buyer-property pair yet' : 'Please link a property before loading this buyer timeline'}</p>
                                <p className="text-[10px] font-bold text-gray-300 mt-1 uppercase">No activity tracked yet</p>
                             </div>
                           )}
