@@ -110,6 +110,7 @@ export async function POST(request: Request) {
             receiver_id: notificationReceiverId,
             actor_id: userId,
             type: 'offer_signed_buyer',
+            content: '买家已完成签署，等待中介确认',
             reference_id: propertyId,
             metadata: existingOffer ? { offer_id: existingOffer.id } : {},
             is_read: false
@@ -118,11 +119,35 @@ export async function POST(request: Request) {
       }
     } else {
       // 卖家的话，更新状态为 accepted
-      const { error } = await supabaseAdmin
+      const { data: updatedOffer, error } = await supabaseAdmin
         .from('octo_offers')
         .update({ status: 'accepted' })
-        .match({ signwell_doc_id: documentId });
+        .match({ signwell_doc_id: documentId })
+        .select('id, property_id, buyer_id')
+        .maybeSingle();
+
       if (error) throw error;
+
+      if (updatedOffer) {
+        // 🌟 通知代理商：卖家已签署
+        const { data: prop } = await supabaseAdmin
+          .from('octo_properties')
+          .select('author_id')
+          .eq('id', updatedOffer.property_id)
+          .single();
+
+        if (prop) {
+          await supabaseAdmin.from('notifications').insert({
+            receiver_id: agentId || prop.author_id,
+            actor_id: userId, // 这里的 userId 是卖家
+            type: 'offer_signed_seller',
+            content: '卖家已接受并签署，交易合意达成！',
+            reference_id: updatedOffer.property_id,
+            metadata: { offer_id: updatedOffer.id },
+            is_read: false
+          });
+        }
+      }
     }
 
     return NextResponse.json({ signed: true });

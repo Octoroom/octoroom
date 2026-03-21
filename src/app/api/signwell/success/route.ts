@@ -67,6 +67,7 @@ export async function GET(request: Request) {
         receiver_id: agentId || prop.author_id,
         actor_id: buyerId,
         type: 'offer_signed_buyer',
+        content: '买家已完成签署，等待中介确认',
         reference_id: propertyId,
         is_read: false
       });

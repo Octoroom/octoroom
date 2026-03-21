@@ -332,6 +332,17 @@ function ContractContent() {
         const data = await response.json();
         
         if (data.signUrl && data.documentId) {
+          // 🌟 通知：买家已签署，等待卖家签字
+          await supabase.from('notifications').insert({
+            receiver_id: property.author_id,
+            actor_id: userId,
+            type: 'offer_pushed_seller',
+            content: '买家已完成签署，等待卖家确认',
+            reference_id: propertyId,
+            metadata: { offer_id: offerId },
+            is_read: false
+          });
+
           setSignUrl(data.signUrl);
           setDocumentId(data.documentId); 
           setStep(2); 
@@ -373,7 +384,8 @@ function ContractContent() {
               buyerId: isAgentDrafting ? targetBuyerId : user.id,
               agentId: searchParams?.get('agent_id') || null,
               offerTerms: finalTerms,
-              isAgentDrafting // Flag for the API to send email instead of embedded url
+              isAgentDrafting, // Flag for the API to send email instead of embedded url
+              isAmendment: !!offerId
             }),
           });
 

@@ -10,7 +10,7 @@ const supabaseAdmin = createClient(
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { templateId, propertyId, buyerName, buyerEmail, buyerId, agentId, offerTerms, isAgentDrafting } = body;
+    const { templateId, propertyId, buyerName, buyerEmail, buyerId, agentId, offerTerms, isAgentDrafting, isAmendment } = body;
 
     if (!templateId || !propertyId || !buyerName || !buyerEmail || !buyerId) {
       return NextResponse.json({ error: "请求参数不完整，缺少买家或房源信息" }, { status: 400 });
@@ -176,10 +176,14 @@ export async function POST(request: Request) {
       }
 
       // 2. Create in-app notification for the buyer
+      const notifType = isAmendment ? 'offer_amended' : 'offer';
+      const notifContent = isAmendment ? '合同需要修改， 请买家确认' : '为你准备了一份购房协议，请确认并签署';
+
       await supabaseAdmin.from('notifications').insert({
         receiver_id: resolvedBuyerId,
         actor_id: agentId || property.author_id,
-        type: 'offer',
+        type: notifType,
+        content: notifContent,
         reference_id: propertyId,
         metadata: { offer_id: newOffer.id }, // 🚀 CRITICAL: Link to the specific offer
         is_read: false

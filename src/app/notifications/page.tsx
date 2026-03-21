@@ -122,7 +122,7 @@ export default function NotificationsPage() {
 
   // 🌟 核心：根据 Tab 过滤数据
   const filteredNotifs = notifications.filter((n: any) => {
-    if (activeTab === 'comments') return ['comment', 'repost', 'offer', 'offer_signed_buyer', 'offer_signed_seller', 'offer_rejected'].includes(n.type);
+    if (activeTab === 'comments') return ['comment', 'repost', 'offer', 'offer_signed_buyer', 'offer_signed_seller', 'offer_rejected', 'offer_rejected_buyer', 'offer_pushed_seller', 'offer_amended'].includes(n.type);
     return ['like', 'bookmark', 'follow'].includes(n.type);
   });
 
@@ -196,12 +196,22 @@ export default function NotificationsPage() {
                       </div>
                       
                       <p className="text-[13px] text-gray-500">
-                        {notif.type === 'follow' && '开始关注你'}
-                        {notif.type === 'like' && '赞了你的帖子'}
-                        {notif.type === 'bookmark' && '收藏了你的帖子'}
-                        {notif.type === 'comment' && '评论了你的帖子'}
-                        {notif.type === 'repost' && '转发了你的帖子'}
-                        {notif.type === 'offer' && '为你准备了一份购房协议，请确认并签署'}
+                        {notif.content || (
+                          <>
+                            {notif.type === 'follow' && '开始关注你'}
+                            {notif.type === 'like' && '赞了你的帖子'}
+                            {notif.type === 'bookmark' && '收藏了你的帖子'}
+                            {notif.type === 'comment' && '评论了你的帖子'}
+                            {notif.type === 'repost' && '转发了你的帖子'}
+                            {notif.type === 'offer' && '为你准备了一份购房协议，请确认并签署'}
+                            {notif.type === 'offer_signed_buyer' && '买家已完成签署，等待中介确认'}
+                            {notif.type === 'offer_signed_seller' && '卖家已接受并签署，交易合意达成！'}
+                            {notif.type === 'offer_pushed_seller' && '买家已完成签署，等待卖家确认'}
+                            {notif.type === 'offer_rejected' && '该出价已被婉拒 (Rejected)'}
+                            {notif.type === 'offer_rejected_buyer' && '买家已婉拒合同，需重新修改合同'}
+                            {notif.type === 'offer_amended' && '合同需要修改， 请买家确认'}
+                          </>
+                        )}
                       </p>
                     </div>
 

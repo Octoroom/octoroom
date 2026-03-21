@@ -45,10 +45,14 @@ export async function POST(request: Request) {
         const receiverId = (rejectedBy === 'SELLER') ? buyerId : agentId;
         const actorId = (rejectedBy === 'SELLER') ? agentId : buyerId;
 
+        const notifType = (rejectedBy === 'BUYER') ? 'offer_rejected_buyer' : 'offer_rejected';
+        const notifContent = (rejectedBy === 'BUYER') ? '买家已婉拒合同，需重新修改合同' : '该出价已被婉拒 (Rejected)';
+
         await supabaseAdmin.from('notifications').insert({
             receiver_id: receiverId,
             actor_id: actorId,
-            type: 'offer_rejected',
+            type: notifType,
+            content: notifContent,
             reference_id: propertyId,
             is_read: false
         });
@@ -57,7 +61,8 @@ export async function POST(request: Request) {
         await supabaseAdmin.from('notifications').insert({
             receiver_id: actorId, // 发起方作为接收者（为了时间线展示）
             actor_id: receiverId, 
-            type: 'offer_rejected',
+            type: notifType,
+            content: notifContent,
             reference_id: propertyId,
             is_read: false
         });
