@@ -122,6 +122,7 @@ export async function POST(request: Request) {
           .eq('actor_id', userId)
           .eq('type', 'offer_signed_buyer')
           .eq('reference_id', propertyId)
+          .eq('metadata->>offer_id', targetOfferId) // 🎯 修复点：精准匹配当前的 offer_id
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
