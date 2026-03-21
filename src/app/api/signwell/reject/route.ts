@@ -69,6 +69,7 @@ export async function POST(request: Request) {
             type: notifType,
             content: notifContent,
             reference_id: propertyId,
+            metadata: { offer_id: offerId },
             is_read: false
         });
 
@@ -79,6 +80,7 @@ export async function POST(request: Request) {
             type: notifType,
             content: notifContent,
             reference_id: propertyId,
+            metadata: { offer_id: offerId },
             is_read: false
         });
 

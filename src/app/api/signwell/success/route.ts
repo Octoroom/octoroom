@@ -30,16 +30,19 @@ export async function GET(request: Request) {
       .eq('buyer_id', buyerId)
       .single();
 
+    let targetOfferId = existingOffer?.id;
+
     // 3. 只有不存在时，才插入新的 Offer
     if (!existingOffer) {
-      const { error } = await supabaseAdmin.from('octo_offers').insert({
+      const { data: newOffer, error } = await supabaseAdmin.from('octo_offers').insert({
         property_id: propertyId,
         buyer_id: buyerId,
         signwell_doc_id: documentId,
         status: 'pending_agent_review' // 状态：等待中介审核
-      });
+      }).select('id').single();
 
       if (error) throw error;
+      targetOfferId = newOffer.id;
       console.log(`✅ 成功录入买家 [${buyerId}] 对房源 [${propertyId}] 的 Offer！`);
     } else {
       // 🌟 如果已经存在（例如 Agent 预先创建的），则更新其状态和 doc_id
@@ -85,6 +88,7 @@ export async function GET(request: Request) {
         type: 'offer_signed_buyer',
         content: '买家已完成签署，等待中介确认',
         reference_id: propertyId,
+        metadata: { offer_id: targetOfferId },
         is_read: false
       });
     }

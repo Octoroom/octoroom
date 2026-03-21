@@ -46,6 +46,8 @@ export async function POST(request: Request) {
         .eq('buyer_id', userId)
         .single();
 
+      let targetOfferId = existingOffer?.id;
+
       if (!existingOffer) {
         // 插入新 Offer，并包含所有的 S&P 详细条款
         const insertData: any = {
@@ -71,8 +73,9 @@ export async function POST(request: Request) {
           insertData.conditions = offerTerms.conditions || null;
         }
 
-        const { error } = await supabaseAdmin.from('octo_offers').insert(insertData);
+        const { data: newOffer, error } = await supabaseAdmin.from('octo_offers').insert(insertData).select('id').single();
         if (error) throw error;
+        targetOfferId = newOffer.id;
       } else {
         // 🌟 如果已经存在（例如 Agent 预先创建的），则更新其状态
         const { error } = await supabaseAdmin
@@ -128,7 +131,7 @@ export async function POST(request: Request) {
             type: 'offer_signed_buyer',
             content: '买家已完成签署，等待中介确认',
             reference_id: propertyId,
-            metadata: existingOffer ? { offer_id: existingOffer.id } : {},
+            metadata: { offer_id: targetOfferId },
             is_read: false
           });
         }
