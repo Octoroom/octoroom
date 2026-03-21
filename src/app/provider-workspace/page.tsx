@@ -25,6 +25,7 @@ interface ActivityLog {
   avatarUrl?: string;
   buyerName?: string;
   amountLabel?: string;
+  metadata?: any;
 }
 
 interface Buyer {
@@ -900,7 +901,8 @@ export default function AgentWorkspacePage() {
       agentName: n.source === 'crm_note' ? 'Agent Follow-up' : (n.buyer_name || 'System Update'),
       avatarUrl: n.avatar_url,
       buyerName: n.buyer_name,
-      amountLabel: n.amount_label
+      amountLabel: n.amount_label,
+      metadata: n.metadata
     })) as ActivityLog[];
   };
 
@@ -1157,7 +1159,21 @@ export default function AgentWorkspacePage() {
                       {log.amountLabel && <span className="px-2 py-0.5 rounded-full bg-gray-50 border border-gray-100 text-gray-700">{log.amountLabel}</span>}
                     </div>
                   )}
-                  <div className="mt-2 flex items-center gap-1.5 opacity-40">
+                  {log.metadata?.offer_id && (
+                    <div className="mt-4 border-t border-gray-50 pt-3">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          router.push(`/contract/${property.id}?offerId=${log.metadata.offer_id}`);
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-xl text-[12px] font-bold hover:bg-gray-800 transition-transform active:scale-95 shadow-sm w-fit"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        查看/审核 Offer
+                      </button>
+                    </div>
+                  )}
+                  <div className="mt-3 flex items-center gap-1.5 opacity-40">
                     <div className="w-3 h-3 rounded-full bg-gray-200" />
                     <span className="text-[10px] font-black text-gray-500 uppercase tracking-tight">{log.agentName}</span>
                   </div>
