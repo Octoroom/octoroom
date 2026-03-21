@@ -38,7 +38,22 @@ export async function POST(request: Request) {
         .single();
     
     if (prop) {
-        const agentId = prop.author_id;
+        let agentId = prop.author_id;
+        
+        // Find the true agent from previous offer notifications
+        const { data: previousNotif } = await supabaseAdmin
+          .from('notifications')
+          .select('actor_id')
+          .eq('receiver_id', offer.buyer_id)
+          .eq('reference_id', propertyId)
+          .in('type', ['offer', 'offer_amended'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+          
+        if (previousNotif?.actor_id) {
+          agentId = previousNotif.actor_id;
+        }
         const buyerId = offer.buyer_id;
 
         // 1. 通知受检方 (如果是卖家拒绝，通知买家；如果是买家拒绝，通知代理/卖家)

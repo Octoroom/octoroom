@@ -63,8 +63,24 @@ export async function GET(request: Request) {
       .single();
     
     if (prop) {
+      let resolvedAgentId = agentId;
+      if (!resolvedAgentId) {
+        const { data: previousNotif } = await supabaseAdmin
+          .from('notifications')
+          .select('actor_id')
+          .eq('receiver_id', buyerId)
+          .eq('reference_id', propertyId)
+          .in('type', ['offer', 'offer_amended'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (previousNotif?.actor_id) {
+          resolvedAgentId = previousNotif.actor_id;
+        }
+      }
+      
       await supabaseAdmin.from('notifications').insert({
-        receiver_id: agentId || prop.author_id,
+        receiver_id: resolvedAgentId || prop.author_id,
         actor_id: buyerId,
         type: 'offer_signed_buyer',
         content: '买家已完成签署，等待中介确认',

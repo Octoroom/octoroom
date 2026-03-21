@@ -382,7 +382,7 @@ function ContractContent() {
               buyerName: purchaserName,
               buyerEmail: isAgentDrafting ? buyerEmail : user.email,
               buyerId: isAgentDrafting ? targetBuyerId : user.id,
-              agentId: searchParams?.get('agent_id') || null,
+              agentId: isAgentDrafting ? user.id : (searchParams?.get('agent_id') || null),
               offerTerms: finalTerms,
               isAgentDrafting, // Flag for the API to send email instead of embedded url
               isAmendment: !!offerId

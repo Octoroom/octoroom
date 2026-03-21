@@ -91,8 +91,24 @@ export async function POST(request: Request) {
         .select('author_id')
         .eq('id', propertyId)
         .single();
+        
+      let resolvedAgentId = agentId;
+      if (!resolvedAgentId) {
+        const { data: previousNotif } = await supabaseAdmin
+          .from('notifications')
+          .select('actor_id')
+          .eq('receiver_id', userId)
+          .eq('reference_id', propertyId)
+          .in('type', ['offer', 'offer_amended'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (previousNotif?.actor_id) {
+          resolvedAgentId = previousNotif.actor_id;
+        }
+      }
 
-      const notificationReceiverId = agentId || prop?.author_id;
+      const notificationReceiverId = resolvedAgentId || prop?.author_id;
       if (notificationReceiverId) {
         const { data: existingNotif } = await supabaseAdmin
           .from('notifications')
@@ -137,8 +153,24 @@ export async function POST(request: Request) {
           .single();
 
         if (prop) {
+          let resolvedAgentId = agentId;
+          if (!resolvedAgentId) {
+            const { data: previousNotif } = await supabaseAdmin
+              .from('notifications')
+              .select('actor_id')
+              .eq('receiver_id', updatedOffer.buyer_id)
+              .eq('reference_id', updatedOffer.property_id)
+              .in('type', ['offer', 'offer_amended'])
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (previousNotif?.actor_id) {
+              resolvedAgentId = previousNotif.actor_id;
+            }
+          }
+          
           await supabaseAdmin.from('notifications').insert({
-            receiver_id: agentId || prop.author_id,
+            receiver_id: resolvedAgentId || prop.author_id,
             actor_id: userId, // 这里的 userId 是卖家
             type: 'offer_signed_seller',
             content: '卖家已接受并签署，交易合意达成！',
