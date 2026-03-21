@@ -36,7 +36,7 @@ export async function GET(request: Request) {
         property_id: propertyId,
         buyer_id: buyerId,
         signwell_doc_id: documentId,
-        status: 'pending_seller_signature' // 状态：等待房东签字
+        status: 'pending_agent_review' // 状态：等待中介审核
       });
 
       if (error) throw error;
@@ -46,7 +46,7 @@ export async function GET(request: Request) {
       const { error } = await supabaseAdmin
         .from('octo_offers')
         .update({ 
-          status: 'pending_seller_signature',
+          status: 'pending_agent_review',
           signwell_doc_id: documentId 
         })
         .match({ id: existingOffer.id });

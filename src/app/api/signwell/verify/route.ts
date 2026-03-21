@@ -52,7 +52,7 @@ export async function POST(request: Request) {
           property_id: propertyId,
           buyer_id: userId,
           signwell_doc_id: documentId,
-          status: 'pending_seller_signature'
+          status: 'pending_agent_review'
         };
 
         if (offerTerms) {
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
         const { error } = await supabaseAdmin
           .from('octo_offers')
           .update({ 
-            status: 'pending_seller_signature',
+            status: 'pending_agent_review',
             signwell_doc_id: documentId 
           })
           .match({ id: existingOffer.id });

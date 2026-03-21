@@ -153,6 +153,7 @@ function PipelineStatusBadge({ status }: { status: ProviderStatus }) {
     PENDING: { text: 'Pending', color: 'bg-[#fdab3d] text-white' },
     LOOKING: { text: 'Looking', color: 'bg-[#c4c4c4] text-white' },
     pending_buyer_signature: { text: 'Buyer Sign', color: 'bg-[#0ea5e9] text-white' },
+    pending_agent_review: { text: 'Agent Review', color: 'bg-[#a855f7] text-white' },
     pending_seller_signature: { text: 'Seller Sign', color: 'bg-[#f97316] text-white' },
     accepted: { text: 'Accepted', color: 'bg-[#16a34a] text-white' },
     sold: { text: 'Sold', color: 'bg-[#15803d] text-white' },

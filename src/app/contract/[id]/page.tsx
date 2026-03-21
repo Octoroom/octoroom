@@ -446,6 +446,27 @@ function ContractContent() {
     }
   };
 
+  const handlePushToSeller = async () => {
+    if (!offerId || !userId) return;
+    setLoading(true);
+    try {
+      const response = await fetch('/api/signwell/forward', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ offerId, propertyId, agentId: userId }),
+      });
+      const data = await response.json();
+      if (!response.ok && !data.success) throw new Error(data.error || '推送失败');
+      
+      alert('已成功推送给房东审核签署。');
+      router.push('/provider-workspace');
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Logic to show/hide the Reject Offer button
   const shouldShowRejectButton = offerId && !isAgentDrafting && (
     (isSeller && (offerStatus === 'pending_seller_signature' || !offerStatus)) || 
@@ -677,22 +698,49 @@ function ContractContent() {
             )}
 
             <div className="flex flex-col md:flex-row gap-4">
-              {shouldShowRejectButton && (
-                <button 
-                  onClick={handleRejectOffer} 
-                  disabled={loading || rejecting} 
-                  className={`flex-1 py-5 rounded-2xl font-bold text-xl transition-all border-2 ${rejecting ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-white text-red-600 border-red-100 hover:bg-red-50 active:scale-[0.98]'}`}
-                >
-                  {rejecting ? '正在处理...' : '拒绝该出价 (Reject Offer)'}
-                </button>
+              {offerStatus === 'pending_agent_review' ? (
+                userId === targetBuyerId ? (
+                   <div className="w-full text-center py-5 bg-gray-50 border border-gray-100 rounded-2xl text-gray-500 font-bold text-lg">已签署，等待中介审核中...</div>
+                ) : (
+                  <>
+                    <button 
+                      onClick={handleRejectOffer} 
+                      disabled={loading || rejecting} 
+                      className={`flex-[1] py-5 rounded-2xl font-bold text-xl transition-all border-2 bg-white text-red-600 border-red-100 hover:bg-red-50 active:scale-[0.98] ${rejecting ? 'opacity-50' : ''}`}
+                    >
+                      {rejecting ? '处理中...' : '退回修改 (Reject)'}
+                    </button>
+                    <button 
+                      onClick={handlePushToSeller} 
+                      disabled={loading || rejecting} 
+                      className={`flex-[2] py-5 rounded-2xl font-black text-xl shadow-2xl transition-all ${loading ? 'bg-purple-400 text-white' : 'bg-purple-600 text-white hover:bg-purple-700 active:scale-[0.98]'}`}
+                    >
+                      {loading ? '正在处理...' : '审核无误，推送给房东签字 (Push to Seller)'}
+                    </button>
+                  </>
+                )
+              ) : (
+                <>
+                  {shouldShowRejectButton && (
+                    <button 
+                      onClick={handleRejectOffer} 
+                      disabled={loading || rejecting} 
+                      className={`flex-1 py-5 rounded-2xl font-bold text-xl transition-all border-2 ${rejecting ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-white text-red-600 border-red-100 hover:bg-red-50 active:scale-[0.98]'}`}
+                    >
+                      {rejecting ? '正在处理...' : '拒绝该出价 (Reject Offer)'}
+                    </button>
+                  )}
+                  {(!isSeller || offerStatus === 'pending_seller_signature') && (
+                    <button 
+                      onClick={handleGenerateContract} 
+                      disabled={loading || rejecting} 
+                      className={`flex-[2] py-5 rounded-2xl font-black text-xl shadow-2xl transition-all ${loading ? 'bg-gray-200 text-gray-400' : 'bg-black text-white hover:bg-gray-800 active:scale-[0.98]'}`}
+                    >
+                      {loading ? '正在同步数据...' : (isSeller && !isAgentDrafting ? '确认无误，进入补签 (Confirm & Go to Sign)' : (isAgentDrafting ? '推送给买家签署 (Send to Buyer)' : (offerId ? '审核并接受出价 (Review & Accept Offer)' : '生成正式合同并开始出价 (Submit Offer)')))}
+                    </button>
+                  )}
+                </>
               )}
-              <button 
-                onClick={handleGenerateContract} 
-                disabled={loading || rejecting} 
-                className={`flex-[2] py-5 rounded-2xl font-black text-xl shadow-2xl transition-all ${loading ? 'bg-gray-200 text-gray-400' : 'bg-black text-white hover:bg-gray-800 active:scale-[0.98]'}`}
-              >
-                {loading ? '正在同步数据...' : (isSeller && !isAgentDrafting ? '确认无误，进入补签 (Confirm & Go to Sign)' : (isAgentDrafting ? '推送给买家签署 (Send to Buyer)' : (isSeller ? '审核并接受出价 (Review & Accept Offer)' : '生成正式合同并开始出价 (Submit Offer)')))}
-              </button>
             </div>
           </div>
         )}
