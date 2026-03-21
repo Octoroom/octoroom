@@ -10,7 +10,7 @@ const supabaseAdmin = createClient(
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { templateId, propertyId, buyerName, buyerEmail, buyerId, agentId, offerTerms, isAgentDrafting, isAmendment } = body;
+    const { templateId, propertyId, buyerName, buyerEmail, buyerId, agentId, offerTerms, isAgentDrafting, isAmendment, offerId } = body;
 
     if (!templateId || !propertyId || !buyerName || !buyerEmail || !buyerId) {
       return NextResponse.json({ error: "请求参数不完整，缺少买家或房源信息" }, { status: 400 });
@@ -164,15 +164,30 @@ export async function POST(request: Request) {
         offerData.conditions = offerTerms.conditions || null;
       }
 
-      const { data: newOffer, error: offerError } = await supabaseAdmin
-        .from('octo_offers')
-        .insert(offerData)
-        .select('id')
-        .single();
+      let targetOfferId = offerId;
 
-      if (offerError) {
-        console.error("Error inserting offer:", offerError);
-        return NextResponse.json({ error: "无法创建报价记录: " + offerError.message }, { status: 500 });
+      if (isAmendment && offerId) {
+        const { error: offerError } = await supabaseAdmin
+          .from('octo_offers')
+          .update(offerData)
+          .eq('id', offerId);
+          
+        if (offerError) {
+          console.error("Error updating offer:", offerError);
+          return NextResponse.json({ error: "无法更新报价记录: " + offerError.message }, { status: 500 });
+        }
+      } else {
+        const { data: newOffer, error: offerError } = await supabaseAdmin
+          .from('octo_offers')
+          .insert(offerData)
+          .select('id')
+          .single();
+
+        if (offerError) {
+          console.error("Error inserting offer:", offerError);
+          return NextResponse.json({ error: "无法创建报价记录: " + offerError.message }, { status: 500 });
+        }
+        targetOfferId = newOffer.id;
       }
 
       // 2. Create in-app notification for the buyer
@@ -185,7 +200,7 @@ export async function POST(request: Request) {
         type: notifType,
         content: notifContent,
         reference_id: propertyId,
-        metadata: { offer_id: newOffer.id }, // 🚀 CRITICAL: Link to the specific offer
+        metadata: { offer_id: targetOfferId }, // 🚀 CRITICAL: Link to the specific offer
         is_read: false
       });
 

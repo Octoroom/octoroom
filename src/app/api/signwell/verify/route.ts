@@ -44,7 +44,9 @@ export async function POST(request: Request) {
         .select('id')
         .eq('property_id', propertyId)
         .eq('buyer_id', userId)
-        .single();
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
       let targetOfferId = existingOffer?.id;
 

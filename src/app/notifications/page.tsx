@@ -170,7 +170,7 @@ export default function NotificationsPage() {
                     key={notif.id} 
                     onClick={() => {
                       if (notif.type === 'follow') router.push(`/user/${notif.actor_id}`);
-                      else if (['offer', 'offer_signed_buyer', 'offer_signed_seller', 'offer_rejected'].includes(notif.type)) {
+                      else if (notif.type.startsWith('offer')) {
                         const offerId = notif.metadata?.offer_id;
                         router.push(`/contract/${notif.reference_id}${offerId ? `?offerId=${offerId}` : ''}`);
                       }

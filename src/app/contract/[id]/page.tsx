@@ -385,7 +385,8 @@ function ContractContent() {
               agentId: isAgentDrafting ? user.id : (searchParams?.get('agent_id') || null),
               offerTerms: finalTerms,
               isAgentDrafting, // Flag for the API to send email instead of embedded url
-              isAmendment: !!offerId
+              isAmendment: !!offerId,
+              offerId: offerId
             }),
           });
 

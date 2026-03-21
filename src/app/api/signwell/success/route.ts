@@ -28,7 +28,9 @@ export async function GET(request: Request) {
       .select('id')
       .eq('property_id', propertyId)
       .eq('buyer_id', buyerId)
-      .single();
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     let targetOfferId = existingOffer?.id;
 
