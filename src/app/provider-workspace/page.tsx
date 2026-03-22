@@ -1186,7 +1186,7 @@ export default function AgentWorkspacePage() {
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
-                          router.push(`/contract/${property.id}?offerId=${log.metadata.offer_id}`);
+                          router.push(`/contract/${property.id}/review?offerId=${log.metadata.offer_id}`);
                         }}
                         className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-xl text-[12px] font-bold hover:bg-gray-800 transition-transform active:scale-95 shadow-sm w-fit"
                       >
