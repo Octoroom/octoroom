@@ -1,15 +1,16 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams, useParams } from 'next/navigation';
 import { ArrowLeft, CheckCircle2, FileEdit, Eye, AlertCircle, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
-export default function AgentOfferReviewPage({ params }: { params: { id: string } }) {
+export default function AgentOfferReviewPage() {
   const router = useRouter();
+  const params = useParams();
   const searchParams = useSearchParams();
   const offerId = searchParams.get('offerId');
-  const propertyId = params.id;
+  const propertyId = params?.id as string;
 
   const [loading, setLoading] = useState(true);
   const [offerDetails, setOfferDetails] = useState<any>(null);
