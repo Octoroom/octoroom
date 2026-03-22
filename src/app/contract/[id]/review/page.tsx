@@ -26,28 +26,18 @@ export default function AgentOfferReviewPage({ params }: { params: { id: string 
       setCurrentUserId(session?.user?.id || null);
       
       try {
-        // 1. 先只查 Offer 本身的核心信息 (最不容易出错的查法)
-        const { data: offer, error: offerError } = await supabase
-          .from('octo_offers')
-          .select('*')
-          .eq('id', offerId)
-          .single();
+        // 1. 调用专属的后端 API 来获取 Offer 核心信息，绕过 RLS 限制
+        const offerRes = await fetch(`/api/workspace/offer-details?offerId=${offerId}&propertyId=${propertyId}&agentId=${session?.user?.id || ''}`);
+        
+        if (!offerRes.ok) throw new Error("API 响应失败");
+        
+        const offerData = await offerRes.json();
+        if (offerData.error) throw new Error(offerData.error);
+        
+        const offer = offerData;
 
-        if (offerError) throw offerError;
-        if (!offer) throw new Error("找不到对应的 Offer 数据");
-
-        // 2. 查到 offer 后，再去查对应的房源地址
-        const { data: propertyData } = await supabase
-          .from('octo_properties')
-          .select('title, address_name')
-          .eq('id', propertyId)
-          .single();
-
-        // 3. 把两块数据拼起来，喂给前端
-        setOfferDetails({
-          ...offer,
-          properties: propertyData || { address_name: 'Unknown Address' }
-        });
+        // 3. 把数据喂给前端
+        setOfferDetails(offer);
 
         // 4. 调取真实 PDF 预览
         if (offer.signwell_doc_id) {
