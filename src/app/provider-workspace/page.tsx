@@ -883,10 +883,22 @@ export default function AgentWorkspacePage() {
   }, [currentAgentId, selectedPropertyId, expandedBuyerId, activeProperty, activeTimelinePropertyId, buyerActivePropertyIds, buyerPropertyAssignments]);
 
   const fetchActivityFeedData = async (buyer: Buyer, propertyId: string) => {
+    // 🔪 绝招 1：在 URL 后面加上当前时间戳，确保每次请求的 URL 都是全新的
+    const timestampBuster = `&_t=${Date.now()}`;
+    
     const query = buyer.roleDescription === 'Seller'
-      ? `/api/workspace/activities?propertyId=${propertyId}&viewerId=${currentAgentId || ''}`
-      : `/api/workspace/activities?propertyId=${propertyId}&buyerEmail=${buyer.email}&buyerId=${buyer.id}&viewerId=${currentAgentId || ''}`;
-    const res = await fetch(query);
+      ? `/api/workspace/activities?propertyId=${propertyId}&viewerId=${currentAgentId || ''}${timestampBuster}`
+      : `/api/workspace/activities?propertyId=${propertyId}&buyerEmail=${buyer.email}&buyerId=${buyer.id}&viewerId=${currentAgentId || ''}${timestampBuster}`;
+    
+    // 🔪 绝招 2：强制 fetch 禁用所有本地和服务器缓存
+    const res = await fetch(query, { 
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      }
+    });
+    
     const data = await res.json();
 
     if (!data.activities || !Array.isArray(data.activities)) {
@@ -894,7 +906,7 @@ export default function AgentWorkspacePage() {
     }
 
     return data.activities.map((n: any) => {
-      // 🛡️ 新增大招：安全解析 metadata。如果是字符串，就把它转换成对象！
+      // 🛡️ 安全解析 metadata
       let safeMetadata = n.metadata;
       if (typeof safeMetadata === 'string') {
         try { safeMetadata = JSON.parse(safeMetadata); } catch (e) { safeMetadata = {}; }
@@ -904,13 +916,12 @@ export default function AgentWorkspacePage() {
         id: n.id,
         type: (n.type === 'offer' || n.type.startsWith('offer_')) ? 'OFFER' : 'NOTE',
         content: n.content || mapNotifToText(n.type),
-        // 顺手兼容一下时区后缀
         timestamp: new Date(n.created_at.endsWith('Z') || n.created_at.includes('+') ? n.created_at : n.created_at + 'Z').toLocaleString(),
         agentName: n.source === 'crm_note' ? 'Agent Follow-up' : (n.buyer_name || 'System Update'),
         avatarUrl: n.avatar_url,
         buyerName: n.buyer_name,
         amountLabel: n.amount_label,
-        metadata: safeMetadata // 👈 使用解析好的对象！
+        metadata: safeMetadata // 真正把数据库里的 JSON 传给按钮！
       };
     }) as ActivityLog[];
   };
