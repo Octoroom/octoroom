@@ -24,8 +24,8 @@ export async function GET(request: Request) {
       throw new Error(data.message || 'Failed to fetch from SignWell');
     }
 
-    // SignWell 会返回一个可以直接嵌入预览的链接，或者下载链接
-    const previewUrl = data.embedded_preview_url || data.preview_url || data.download_url;
+    // SignWell 会返回一个可以直接嵌入预览的链接，或者下载链接. Prefer download_url to avoid iframe refusal (X-Frame-Options) on normal preview_urls
+    const previewUrl = data.embedded_preview_url || data.download_url || data.preview_url;
 
     return NextResponse.json({ previewUrl });
   } catch (error: any) {
