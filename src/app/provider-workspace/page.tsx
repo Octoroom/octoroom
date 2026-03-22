@@ -255,10 +255,8 @@ export default function AgentWorkspacePage() {
 
   // Update orderedPipeline whenever mocked or cloud buyers change
   useEffect(() => {
-    const basePipeline = cloudBuyers.length > 0
-      ? [...cloudBuyers]
-      : [...(MOCKED_PIPELINE[selectedPropertyId] || [])];
-    
+    const basePipeline = [...cloudBuyers];
+
     // 🧠 Load persisted order from localStorage
     const savedOrder = localStorage.getItem(`octoroom_pipeline_order_${selectedPropertyId}`);
     if (savedOrder) {
@@ -694,9 +692,7 @@ export default function AgentWorkspacePage() {
   };
 
   // Prefer cloud-synced buyers whenever they exist so real-time updates are not masked by mock data.
-  const pipeline = cloudBuyers.length > 0
-    ? [...cloudBuyers]
-    : (selectedPropertyId && MOCKED_PIPELINE[selectedPropertyId] ? [...MOCKED_PIPELINE[selectedPropertyId]] : []);
+  const pipeline = [...cloudBuyers];
   const activeTimelinePropertyId = expandedBuyerId ? getBuyerContextPropertyId(expandedBuyerId) : selectedPropertyId;
 
   useEffect(() => {
