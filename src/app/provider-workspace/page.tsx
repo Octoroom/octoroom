@@ -1165,6 +1165,9 @@ export default function AgentWorkspacePage() {
                     <span className="text-[10px] font-bold text-gray-300">{log.timestamp}</span>
                   </div>
                   <p className="text-[14px] font-bold text-gray-800 leading-relaxed">{log.content}</p>
+                  <div className="text-xs text-red-500 break-all bg-red-50 p-2 rounded mt-2">
+                    Debug Metadata: {JSON.stringify(log.metadata)}
+                  </div>
                   {(log.buyerName || log.amountLabel) && (
                     <div className="mt-2 flex items-center gap-2 text-[11px] font-bold text-gray-500">
                       {log.buyerName && <span>{log.buyerName}</span>}
