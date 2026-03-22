@@ -25,34 +25,46 @@ export default function AgentOfferReviewPage({ params }: { params: { id: string 
       const { data: { session } } = await supabase.auth.getSession();
       setCurrentUserId(session?.user?.id || null);
       
-      // 1. 获取 Offer 核心信息
-      const { data: offer, error } = await supabase
-        .from('octo_offers')
-        .select('*, properties:property_id(title, address_name)')
-        .eq('id', offerId)
-        .single();
+      try {
+        // 1. 先只查 Offer 本身的核心信息 (最不容易出错的查法)
+        const { data: offer, error: offerError } = await supabase
+          .from('octo_offers')
+          .select('*')
+          .eq('id', offerId)
+          .single();
 
-      if (error || !offer) {
-        console.error('Failed to load offer:', error);
-        setLoading(false);
-        return;
-      }
-      setOfferDetails(offer);
+        if (offerError) throw offerError;
+        if (!offer) throw new Error("找不到对应的 Offer 数据");
 
-      // 2. 调取真实 PDF 预览
-      if (offer.signwell_doc_id) {
-        try {
+        // 2. 查到 offer 后，再去查对应的房源地址
+        const { data: propertyData } = await supabase
+          .from('octo_properties')
+          .select('title, address_name')
+          .eq('id', propertyId)
+          .single();
+
+        // 3. 把两块数据拼起来，喂给前端
+        setOfferDetails({
+          ...offer,
+          properties: propertyData || { address_name: 'Unknown Address' }
+        });
+
+        // 4. 调取真实 PDF 预览
+        if (offer.signwell_doc_id) {
           const res = await fetch(`/api/signwell/preview?documentId=${offer.signwell_doc_id}`);
           const previewData = await res.json();
           if (previewData.previewUrl) {
             setPdfPreviewUrl(previewData.previewUrl);
+          } else {
+            console.error("未能获取到 PDF 预览链接", previewData);
           }
-        } catch (err) {
-          console.error('Failed to load PDF preview:', err);
         }
+      } catch (err) {
+        // 👇 如果这里打印了错，按 F12 就能看到具体原因！
+        console.error('Failed to load offer data:', err); 
+      } finally {
+        setLoading(false);
       }
-      
-      setLoading(false);
     }
 
     init();
