@@ -893,17 +893,26 @@ export default function AgentWorkspacePage() {
       return [] as ActivityLog[];
     }
 
-    return data.activities.map((n: any) => ({
-      id: n.id,
-      type: (n.type === 'offer' || n.type.startsWith('offer_')) ? 'OFFER' : 'NOTE',
-      content: n.content || mapNotifToText(n.type),
-      timestamp: new Date(n.created_at).toLocaleString(),
-      agentName: n.source === 'crm_note' ? 'Agent Follow-up' : (n.buyer_name || 'System Update'),
-      avatarUrl: n.avatar_url,
-      buyerName: n.buyer_name,
-      amountLabel: n.amount_label,
-      metadata: n.metadata
-    })) as ActivityLog[];
+    return data.activities.map((n: any) => {
+      // 🛡️ 新增大招：安全解析 metadata。如果是字符串，就把它转换成对象！
+      let safeMetadata = n.metadata;
+      if (typeof safeMetadata === 'string') {
+        try { safeMetadata = JSON.parse(safeMetadata); } catch (e) { safeMetadata = {}; }
+      }
+
+      return {
+        id: n.id,
+        type: (n.type === 'offer' || n.type.startsWith('offer_')) ? 'OFFER' : 'NOTE',
+        content: n.content || mapNotifToText(n.type),
+        // 顺手兼容一下时区后缀
+        timestamp: new Date(n.created_at.endsWith('Z') || n.created_at.includes('+') ? n.created_at : n.created_at + 'Z').toLocaleString(),
+        agentName: n.source === 'crm_note' ? 'Agent Follow-up' : (n.buyer_name || 'System Update'),
+        avatarUrl: n.avatar_url,
+        buyerName: n.buyer_name,
+        amountLabel: n.amount_label,
+        metadata: safeMetadata // 👈 使用解析好的对象！
+      };
+    }) as ActivityLog[];
   };
 
   const fetchRealActivities = async (buyer: Buyer, forceRefresh: boolean = false, propertyIdOverride?: string) => {
@@ -1115,7 +1124,10 @@ export default function AgentWorkspacePage() {
     const isTimelineLoading = selectedPropertyId === property.id ? loadingActivities && !cachedActivities : false;
 
     return (
-      <div className="px-4 pb-5 pt-2 border-t border-gray-100 bg-gray-50/30">
+      <div 
+      className="px-4 pb-5 pt-2 border-t border-gray-100 bg-gray-50/30 cursor-default"
+      onClick={(e) => e.stopPropagation()} // 👈 加上这行：拦截点击事件，防止触发卡片收缩！
+      >
         <div className="flex items-center justify-between pl-1 pr-1 mb-4">
           <div className="flex items-center gap-2">
             <History className="w-4 h-4 text-gray-400" />
