@@ -1,4 +1,3 @@
-
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -140,7 +139,7 @@ export async function GET(request: Request) {
       };
     };
 
-    // 5. Merge and Sort
+    // 5. Merge and Sort (🎯 修复点：强制透传 metadata，并解决 UTC 时间差问题)
     const combined = [
       ...filteredNotifs.map((n: any) => {
         const buyerMeta = resolveBuyerIdentity(n.actor_id);
@@ -150,7 +149,10 @@ export async function GET(request: Request) {
           buyer_name: buyerMeta.buyer_name,
           avatar_url: buyerMeta.avatar_url,
           amount_label: buyerMeta.amount_label,
-          content: n.content || buildNotificationContent(n.type, buyerMeta.buyer_name, buyerMeta.amount_label) || n.content
+          content: n.content || buildNotificationContent(n.type, buyerMeta.buyer_name, buyerMeta.amount_label) || n.content,
+          metadata: n.metadata, // 强制提取并保留 metadata
+          // 修复时区：如果数据库返回的时间没有带时区标识符 (Z 或 +)，强行补上 Z，让前端能正确转回新西兰时间
+          created_at: (n.created_at.endsWith('Z') || n.created_at.includes('+')) ? n.created_at : `${n.created_at}Z`
         };
       }),
       ...(notes || []).map((n: any) => {
@@ -160,7 +162,9 @@ export async function GET(request: Request) {
           source: 'crm_note',
           buyer_name: buyerMeta.buyer_name,
           avatar_url: buyerMeta.avatar_url,
-          amount_label: buyerMeta.amount_label
+          amount_label: buyerMeta.amount_label,
+          metadata: n.metadata, // 强制提取并保留 metadata
+          created_at: (n.created_at.endsWith('Z') || n.created_at.includes('+')) ? n.created_at : `${n.created_at}Z`
         };
       })
     ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
